@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Optimizer explainer</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 16px;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-size: 15px;
+    color: #222;
+    background: #fff;
+  }
+  #layout {
+    display: flex;
+    gap: 16px;
+    align-items: stretch;
+  }
+  #plot-panel {
+    flex: 0 0 70%;
+    max-width: 70%;
+    min-width: 0;
+  }
+  #text-panel {
+    flex: 1 1 0;
+    min-width: 0;
+    border: 1px solid #999;
+    padding: 12px 16px;
+  }
+  #instruction {
+    margin: 0 0 8px 0;
+  }
+  #plot-box {
+    border: 1px solid #999;
+    padding: 8px;
+  }
+  #plot-top {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+  }
+  .control-box {
+    border: 1px solid #999;
+    padding: 6px 10px;
+    background: #fff;
+  }
+  #optimizer-box label {
+    display: block;
+    cursor: pointer;
+    line-height: 1.6;
+  }
+  .swatch {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin: 0 4px 0 2px;
+  }
+  #run-box button {
+    font: inherit;
+    padding: 2px 10px;
+    margin-right: 4px;
+    cursor: pointer;
+  }
+  #play-btn { min-width: 64px; }
+  #step-counter {
+    margin-left: 6px;
+    font-variant-numeric: tabular-nums;
+  }
+  #plot {
+    display: block;
+    width: 100%;
+    height: auto;
+    border: 1px solid #ccc;
+  }
+  #text-panel h2 {
+    margin: 0 0 8px 0;
+    font-size: 18px;
+  }
+  #values {
+    margin-top: 16px;
+    border-collapse: collapse;
+    font-variant-numeric: tabular-nums;
+  }
+  #values td {
+    padding: 3px 12px 3px 0;
+    vertical-align: top;
+  }
+  #values td:first-child { color: #555; }
+  #status { margin-top: 8px; color: #555; }
+</style>
+</head>
+<body>
+
+<div id="layout">
+  <div id="plot-panel">
+    <p id="instruction">Instruction text goes here (placeholder).</p>
+    <div id="plot-box">
+      <div id="plot-top">
+        <div id="optimizer-box" class="control-box"></div>
+        <div id="run-box" class="control-box">
+          <button id="play-btn" type="button">Play</button>
+          <button id="step-btn" type="button">Step (+1)</button>
+          <button id="reset-btn" type="button">Reset</button>
+          <span id="step-counter">Step: 0</span>
+        </div>
+      </div>
+      <canvas id="plot"></canvas>
+    </div>
+  </div>
+
+  <div id="text-panel">
+    <h2 id="focus-name"></h2>
+    <p id="focus-description"></p>
+    <table id="values"></table>
+    <p id="status"></p>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+// =====================================================================
+// Loss landscape (swap these two functions to add another landscape)
+// =====================================================================
+function loss(x) {
+  return x[0] * x[0] + 20 * x[1] * x[1];
+}
+
+function gradient(x) {
+  return [2 * x[0], 40 * x[1]];
+}
+
+const VIEW = { x1Min: -2, x1Max: 2, x2Min: -1, x2Max: 1 };
+const START = [-1.5, 0.5];
+const MINIMUM = [0, 0];
+const CONTOUR_LEVELS = [0.1, 0.5, 1, 2, 4, 7, 10, 14, 19];
+
+// =====================================================================
+// Optimizers
+// Each has: init() -> fresh state (all zeros)
+//           step(state, g) -> { step: [dx1, dx2], arrows: [...] }
+// step() updates the optimizer's own state (v, m, s, t) but not the
+// position; the caller adds `step` to the position.
+// =====================================================================
+const COLORS = { gd: "#1f77b4", momentum: "#ff7f0e", adam: "#2ca02c" };
+const ARROW_NEW_GRADIENT = "#7b3fb5";  // Momentum: new-gradient part
+const ARROW_CARRIED_OVER = "#d6408f";  // Momentum: carried-over part
+const ARROW_ADAM_GRADIENT = "#7b3fb5"; // Adam: -g
+const ARROW_ADAM_AVERAGED = "#d6408f"; // Adam: -m_hat
+const ARROW_ADAM_STEP = COLORS.adam;   // Adam: step actually taken (Adam green)
+
+const GD_PARAMS = { lr: 0.04 };
+function gdInit() {
+  return {};
+}
+function gdStep(state, g) {
+  const lr = GD_PARAMS.lr;
+  const step = [-lr * g[0], -lr * g[1]];
+  return {
+    step: step,
+    arrows: [{ vec: step, color: COLORS.gd, label: "step taken (-lr*g)" }]
+  };
+}
+
+const MOMENTUM_PARAMS = { lr: 0.01, beta: 0.9 };
+function momentumInit() {
+  return { v: [0, 0] };
+}
+function momentumStep(state, g) {
+  const lr = MOMENTUM_PARAMS.lr, beta = MOMENTUM_PARAMS.beta;
+  const vPrev = state.v;
+  const gradientPart = [-lr * g[0], -lr * g[1]];
+  const carriedPart = [-lr * beta * vPrev[0], -lr * beta * vPrev[1]];
+  state.v = [beta * vPrev[0] + g[0], beta * vPrev[1] + g[1]];
+  const step = [-lr * state.v[0], -lr * state.v[1]];
+  return {
+    step: step,
+    arrows: [
+      { vec: gradientPart, color: ARROW_NEW_GRADIENT, label: "new-gradient part (-lr*g)" },
+      { vec: carriedPart, color: ARROW_CARRIED_OVER, label: "carried-over part (-lr*beta*v_previous)" },
+      { vec: step, color: COLORS.momentum, label: "step taken (their sum)" }
+    ]
+  };
+}
+
+const ADAM_PARAMS = { lr: 0.1, b1: 0.9, b2: 0.999, eps: 1e-8 };
+function adamInit() {
+  return { m: [0, 0], s: [0, 0], t: 0 };
+}
+function adamStep(state, g) {
+  const p = ADAM_PARAMS;
+  state.t += 1;
+  const step = [0, 0], mHat = [0, 0], sqrtSHat = [0, 0], effectiveLr = [0, 0];
+  for (let i = 0; i < 2; i++) {
+    state.m[i] = p.b1 * state.m[i] + (1 - p.b1) * g[i];
+    state.s[i] = p.b2 * state.s[i] + (1 - p.b2) * g[i] * g[i];
+    mHat[i] = state.m[i] / (1 - Math.pow(p.b1, state.t));
+    sqrtSHat[i] = Math.sqrt(state.s[i] / (1 - Math.pow(p.b2, state.t)));
+    effectiveLr[i] = p.lr / sqrtSHat[i];
+    step[i] = -p.lr * mHat[i] / (sqrtSHat[i] + p.eps);
+  }
+  // The three arrows have very different true lengths, so each is drawn
+  // at the same fixed length (direction only). -g is normally the same
+  // width as -m_hat; when the two point (almost) the same way, as on
+  // step 1, -g is drawn thicker so it stays visible underneath.
+  const gLen = Math.hypot(g[0], g[1]), mLen = Math.hypot(mHat[0], mHat[1]);
+  const cosAngle = gLen > 0 && mLen > 0 ? (g[0] * mHat[0] + g[1] * mHat[1]) / (gLen * mLen) : 0;
+  const overlap = cosAngle > Math.cos(3 * Math.PI / 180);  // within 3 degrees
+  return {
+    step: step,
+    arrows: [
+      { vec: [-g[0], -g[1]], color: ARROW_ADAM_GRADIENT, fixedLength: true,
+        width: overlap ? 6.5 : 4, head: overlap ? 19 : 14,
+        label: "-g: where gradient descent would go" },
+      { vec: [-mHat[0], -mHat[1]], color: ARROW_ADAM_AVERAGED, fixedLength: true, width: 4, head: 14,
+        label: "-m_hat: after averaging with past gradients" },
+      { vec: step, color: ARROW_ADAM_STEP, fixedLength: true, width: 3.5, head: 12,
+        label: "step taken: after dividing each coordinate by sqrt(s_hat)" }
+    ],
+    details: [g, mHat, sqrtSHat, effectiveLr, step]  // same order as detailLabels
+  };
+}
+const ADAM_DETAIL_LABELS = [
+  "gradient g",
+  "m_hat",
+  "sqrt(s_hat)",
+  "effective learning rate per coordinate: lr / sqrt(s_hat)",
+  "step taken"
+];
+const ADAM_LEGEND_NOTE = "All three arrows are drawn at the same length (direction only).";
+
+const OPTIMIZERS = {
+  gd: {
+    name: "GD",
+    color: COLORS.gd,
+    init: gdInit,
+    step: gdStep,
+    showLegend: false,
+    description: "Placeholder: gradient descent (GD) description goes here."
+  },
+  momentum: {
+    name: "Momentum",
+    color: COLORS.momentum,
+    init: momentumInit,
+    step: momentumStep,
+    showLegend: true,
+    description: "Placeholder: Momentum description goes here."
+  },
+  adam: {
+    name: "Adam",
+    color: COLORS.adam,
+    init: adamInit,
+    step: adamStep,
+    showLegend: true,
+    legendNote: ADAM_LEGEND_NOTE,
+    detailLabels: ADAM_DETAIL_LABELS,
+    description: "Placeholder: Adam description goes here."
+  }
+};
+const OPTIMIZER_IDS = ["gd", "momentum", "adam"];
+
+// =====================================================================
+// Simulation state
+// =====================================================================
+const STEP_INTERVAL_MS = 150;
+const MAX_PLAY_STEPS = 200;
+const STOP_LOSS = 0.001;
+
+const runs = {};          // id -> { x, state, path, stopped, last }
+let checkOrder = ["gd"];  // checked ids, oldest first (last one = most recently checked)
+let stepCount = 0;
+let playTimer = null;
+let arrowInfo = null;     // { id, origin, arrows } for the latest single-optimizer Step
+
+function isChecked(id) {
+  return checkOrder.indexOf(id) !== -1;
+}
+
+function checkedIds() {
+  return OPTIMIZER_IDS.filter(isChecked);
+}
+
+function focusId() {
+  return checkOrder.length ? checkOrder[checkOrder.length - 1] : null;
+}
+
+function resetAll() {
+  pause();
+  for (const id of OPTIMIZER_IDS) {
+    runs[id] = {
+      x: START.slice(),
+      state: OPTIMIZERS[id].init(),
+      path: [START.slice()],
+      stopped: false,
+      last: null
+    };
+  }
+  stepCount = 0;
+  arrowInfo = null;
+  render();
+}
+
+function allStopped() {
+  const ids = checkedIds();
+  return ids.every(function (id) { return runs[id].stopped; });
+}
+
+// Advance every checked optimizer that is still moving by one step.
+// Returns false if nothing could move.
+function advance(showArrows) {
+  const ids = checkedIds();
+  if (ids.length === 0 || allStopped()) return false;
+
+  arrowInfo = null;
+  for (const id of ids) {
+    const run = runs[id];
+    if (run.stopped) continue;
+    const origin = run.x.slice();
+    const g = gradient(run.x);
+    const result = OPTIMIZERS[id].step(run.state, g);
+    run.x = [run.x[0] + result.step[0], run.x[1] + result.step[1]];
+    run.path.push(run.x.slice());
+    run.last = { gradient: g, step: result.step, details: result.details };
+    if (loss(run.x) < STOP_LOSS) run.stopped = true;
+    if (showArrows && ids.length === 1) {
+      arrowInfo = { id: id, origin: origin, arrows: result.arrows };
+    }
+  }
+  stepCount += 1;
+  return true;
+}
+
+function play() {
+  if (playTimer !== null) return;
+  if (checkedIds().length === 0 || allStopped() || stepCount >= MAX_PLAY_STEPS) return;
+  arrowInfo = null;  // no arrows while playing
+  playTimer = setInterval(function () {
+    advance(false);
+    if (allStopped() || stepCount >= MAX_PLAY_STEPS) pause();
+    render();
+  }, STEP_INTERVAL_MS);
+  render();
+}
+
+function pause() {
+  if (playTimer !== null) {
+    clearInterval(playTimer);
+    playTimer = null;
+  }
+}
+
+function stepOnce() {
+  pause();
+  advance(true);
+  render();
+}
+
+// =====================================================================
+// Drawing
+// =====================================================================
+const CANVAS_W = 1000;  // logical drawing size; same pixels-per-unit on both axes
+const CANVAS_H = 500;
+const PIXEL_SCALE = 2;  // backing-store scale for sharp lines
+const ARROW_TARGET_PX = 90;  // longest arrow of a step is drawn at least this long
+
+const canvas = document.getElementById("plot");
+canvas.width = CANVAS_W * PIXEL_SCALE;
+canvas.height = CANVAS_H * PIXEL_SCALE;
+const ctx = canvas.getContext("2d");
+
+function toPx(x) {
+  return [
+    (x[0] - VIEW.x1Min) / (VIEW.x1Max - VIEW.x1Min) * CANVAS_W,
+    (VIEW.x2Max - x[1]) / (VIEW.x2Max - VIEW.x2Min) * CANVAS_H
+  ];
+}
+
+// Contours are traced from loss() itself (marching squares), so a new
+// landscape only needs new loss/gradient functions and contour levels.
+function drawContours(c) {
+  const nx = 200, ny = 100;
+  const dx = (VIEW.x1Max - VIEW.x1Min) / nx;
+  const dy = (VIEW.x2Max - VIEW.x2Min) / ny;
+  const vals = [];
+  for (let j = 0; j <= ny; j++) {
+    const row = [];
+    for (let i = 0; i <= nx; i++) {
+      row.push(loss([VIEW.x1Min + i * dx, VIEW.x2Min + j * dy]));
+    }
+    vals.push(row);
+  }
+
+  function crossing(pa, va, pb, vb, level) {
+    const t = (level - va) / (vb - va);
+    return toPx([pa[0] + t * (pb[0] - pa[0]), pa[1] + t * (pb[1] - pa[1])]);
+  }
+
+  c.strokeStyle = "#b8b8b8";
+  c.lineWidth = 1;
+  for (const level of CONTOUR_LEVELS) {
+    c.beginPath();
+    for (let j = 0; j < ny; j++) {
+      for (let i = 0; i < nx; i++) {
+        const x0 = VIEW.x1Min + i * dx, x1 = x0 + dx;
+        const y0 = VIEW.x2Min + j * dy, y1 = y0 + dy;
+        const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
+        const v = [vals[j][i], vals[j][i + 1], vals[j + 1][i + 1], vals[j + 1][i]];
+        const pts = [];
+        for (let k = 0; k < 4; k++) {
+          const k2 = (k + 1) % 4;
+          if ((v[k] < level) !== (v[k2] < level)) {
+            pts.push(crossing(corners[k], v[k], corners[k2], v[k2], level));
+          }
+        }
+        for (let k = 0; k + 1 < pts.length; k += 2) {
+          c.moveTo(pts[k][0], pts[k][1]);
+          c.lineTo(pts[k + 1][0], pts[k + 1][1]);
+        }
+      }
+    }
+    c.stroke();
+  }
+}
+
+// The contours never change, so draw them once and reuse the image.
+const background = document.createElement("canvas");
+background.width = canvas.width;
+background.height = canvas.height;
+(function () {
+  const c = background.getContext("2d");
+  c.scale(PIXEL_SCALE, PIXEL_SCALE);
+  c.fillStyle = "#fff";
+  c.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  drawContours(c);
+})();
+
+function drawMarkers() {
+  ctx.font = "13px system-ui, sans-serif";
+  ctx.fillStyle = "#222";
+  ctx.strokeStyle = "#222";
+  ctx.lineWidth = 2;
+
+  // minimum: a cross
+  const m = toPx(MINIMUM);
+  ctx.beginPath();
+  ctx.moveTo(m[0] - 6, m[1] - 6); ctx.lineTo(m[0] + 6, m[1] + 6);
+  ctx.moveTo(m[0] - 6, m[1] + 6); ctx.lineTo(m[0] + 6, m[1] - 6);
+  ctx.stroke();
+  ctx.fillText("minimum (0, 0)", m[0] + 10, m[1] + 18);
+
+  // start: a ring
+  const s = toPx(START);
+  ctx.beginPath();
+  ctx.arc(s[0], s[1], 7, 0, 2 * Math.PI);
+  ctx.stroke();
+  ctx.fillText("start (" + START[0] + ", " + START[1] + ")", s[0] - 30, s[1] - 14);
+}
+
+function drawPath(id) {
+  const path = runs[id].path;
+  ctx.strokeStyle = OPTIMIZERS[id].color;
+  ctx.fillStyle = OPTIMIZERS[id].color;
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < path.length; i++) {
+    const p = toPx(path[i]);
+    if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
+  }
+  ctx.stroke();
+  for (let i = 0; i < path.length; i++) {
+    const p = toPx(path[i]);
+    ctx.beginPath();
+    ctx.arc(p[0], p[1], 3, 0, 2 * Math.PI);
+    ctx.fill();
+  }
+}
+
+function drawArrow(from, to, color, width, headSize) {
+  const dx = to[0] - from[0], dy = to[1] - from[1];
+  const len = Math.hypot(dx, dy);
+  if (len < 0.5) return;  // nothing to show (e.g. carried-over part on step 1)
+  const ux = dx / len, uy = dy / len;
+  const head = Math.min(headSize || 12, len * 0.6);
+  const baseX = to[0] - ux * head, baseY = to[1] - uy * head;
+  ctx.strokeStyle = color;
+  ctx.fillStyle = color;
+  ctx.lineWidth = width;
+  ctx.beginPath();
+  ctx.moveTo(from[0], from[1]);
+  ctx.lineTo(baseX, baseY);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(to[0], to[1]);
+  ctx.lineTo(baseX - uy * head * 0.45, baseY + ux * head * 0.45);
+  ctx.lineTo(baseX + uy * head * 0.45, baseY - ux * head * 0.45);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawArrows() {
+  if (!arrowInfo) return;
+  const pxPerUnit = CANVAS_W / (VIEW.x1Max - VIEW.x1Min);
+  const origin = toPx(arrowInfo.origin);
+
+  // One common scale factor for all arrows of this step.
+  let longest = 0;
+  for (const a of arrowInfo.arrows) {
+    longest = Math.max(longest, Math.hypot(a.vec[0], a.vec[1]) * pxPerUnit);
+  }
+  if (longest === 0) return;
+  const factor = Math.max(1, ARROW_TARGET_PX / longest);
+
+  arrowInfo.arrows.forEach(function (a, i) {
+    const isLast = i === arrowInfo.arrows.length - 1;  // the step actually taken
+    // Fixed-length arrows show direction only; the others share `factor`.
+    const lengthPx = Math.hypot(a.vec[0], a.vec[1]) * pxPerUnit;
+    if (lengthPx === 0) return;
+    const scale = a.fixedLength ? ARROW_TARGET_PX / lengthPx : factor;
+    const tip = [
+      origin[0] + a.vec[0] * pxPerUnit * scale,
+      origin[1] - a.vec[1] * pxPerUnit * scale
+    ];
+    drawArrow(origin, tip, a.color, a.width || (isLast ? 3.5 : 2.5), a.head);
+  });
+
+  const opt = OPTIMIZERS[arrowInfo.id];
+  if (opt.showLegend) drawLegend(arrowInfo.arrows, opt.legendNote);
+}
+
+function drawLegend(arrows, note) {
+  ctx.font = "13px system-ui, sans-serif";
+  const rowH = 20, pad = 8;
+  let textW = 0;
+  for (const a of arrows) textW = Math.max(textW, ctx.measureText(a.label).width);
+  const noteW = note ? ctx.measureText(note).width : 0;
+  const w = Math.max(pad * 2 + 34 + textW, pad * 2 + noteW);
+  const h = pad * 2 + rowH * (arrows.length + (note ? 1 : 0));
+  const x = 10, y = CANVAS_H - h - 10;
+
+  ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+  ctx.fillRect(x, y, w, h);
+  ctx.strokeStyle = "#999";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(x, y, w, h);
+
+  arrows.forEach(function (a, i) {
+    const cy = y + pad + rowH * i + rowH / 2;
+    drawArrow([x + pad, cy], [x + pad + 26, cy], a.color, 2.5);
+    ctx.fillStyle = "#222";
+    ctx.textBaseline = "middle";
+    ctx.fillText(a.label, x + pad + 34, cy);
+    ctx.textBaseline = "alphabetic";
+  });
+
+  if (note) {
+    ctx.fillStyle = "#222";
+    ctx.textBaseline = "middle";
+    ctx.fillText(note, x + pad, y + pad + rowH * arrows.length + rowH / 2);
+    ctx.textBaseline = "alphabetic";
+  }
+}
+
+function drawPlot() {
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.drawImage(background, 0, 0);
+  ctx.setTransform(PIXEL_SCALE, 0, 0, PIXEL_SCALE, 0, 0);
+  drawMarkers();
+  for (const id of checkedIds()) drawPath(id);
+  drawArrows();
+}
+
+// =====================================================================
+// Text panel and controls
+// =====================================================================
+function fmt(n) {
+  return n.toFixed(4);
+}
+function fmtVec(v) {
+  return "(" + fmt(v[0]) + ", " + fmt(v[1]) + ")";
+}
+
+function renderText() {
+  const nameEl = document.getElementById("focus-name");
+  const descEl = document.getElementById("focus-description");
+  const valuesEl = document.getElementById("values");
+  const statusEl = document.getElementById("status");
+  const id = focusId();
+
+  valuesEl.innerHTML = "";
+  statusEl.textContent = "";
+  nameEl.style.display = "";
+  descEl.style.display = "";
+  if (id === null) {
+    nameEl.textContent = "No optimizer selected";
+    nameEl.style.color = "";
+    descEl.textContent = "Check GD, Momentum, or Adam to begin.";
+    return;
+  }
+
+  // Two or three checked: one compact row per checked optimizer.
+  const ids = checkedIds();
+  if (ids.length > 1) {
+    nameEl.style.display = "none";
+    descEl.style.display = "none";
+    for (const cid of ids) {
+      const r = runs[cid];
+      const tr = document.createElement("tr");
+      const nameTd = document.createElement("td");
+      const swatch = document.createElement("span");
+      swatch.className = "swatch";
+      swatch.style.background = OPTIMIZERS[cid].color;
+      nameTd.appendChild(swatch);
+      nameTd.appendChild(document.createTextNode(OPTIMIZERS[cid].name));
+      nameTd.style.color = "#222";
+      tr.appendChild(nameTd);
+      const cells = [
+        "step " + (r.path.length - 1),
+        "loss " + fmt(loss(r.x)),
+        r.stopped ? "stopped" : ""
+      ];
+      for (const cell of cells) {
+        const td = document.createElement("td");
+        td.textContent = cell;
+        tr.appendChild(td);
+      }
+      valuesEl.appendChild(tr);
+    }
+    return;
+  }
+
+  const opt = OPTIMIZERS[id];
+  const run = runs[id];
+  nameEl.textContent = opt.name;
+  nameEl.style.color = opt.color;
+  descEl.textContent = opt.description;
+
+  let rows = [
+    ["Step", String(run.path.length - 1)],
+    ["Position", fmtVec(run.x)]
+  ];
+  if (opt.detailLabels) {
+    // Optimizer-specific rows (Adam), each an (x1, x2) pair.
+    opt.detailLabels.forEach(function (label, i) {
+      rows.push([label, run.last ? fmtVec(run.last.details[i]) : "-"]);
+    });
+  } else {
+    rows.push(["Gradient (at the point it just left)", run.last ? fmtVec(run.last.gradient) : "-"]);
+    rows.push(["Step taken", run.last ? fmtVec(run.last.step) : "-"]);
+  }
+  rows.push(["Loss", fmt(loss(run.x))]);
+  for (const row of rows) {
+    const tr = document.createElement("tr");
+    for (const cell of row) {
+      const td = document.createElement("td");
+      td.textContent = cell;
+      tr.appendChild(td);
+    }
+    valuesEl.appendChild(tr);
+  }
+  if (run.stopped) statusEl.textContent = "Stopped: loss is below " + STOP_LOSS + ".";
+}
+
+function render() {
+  drawPlot();
+  renderText();
+  document.getElementById("step-counter").textContent = "Step: " + stepCount;
+  document.getElementById("play-btn").textContent = playTimer !== null ? "Pause" : "Play";
+}
+
+function buildCheckboxes() {
+  const box = document.getElementById("optimizer-box");
+  for (const id of OPTIMIZER_IDS) {
+    const label = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = isChecked(id);
+    input.addEventListener("change", function () {
+      checkOrder = checkOrder.filter(function (other) { return other !== id; });
+      if (input.checked) checkOrder.push(id);
+      resetAll();  // checking or unchecking a box also resets
+    });
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = OPTIMIZERS[id].color;
+    label.appendChild(input);
+    label.appendChild(swatch);
+    label.appendChild(document.createTextNode(OPTIMIZERS[id].name));
+    box.appendChild(label);
+  }
+}
+
+document.getElementById("play-btn").addEventListener("click", function () {
+  if (playTimer !== null) {
+    pause();
+    render();
+  } else {
+    play();
+  }
+});
+document.getElementById("step-btn").addEventListener("click", stepOnce);
+document.getElementById("reset-btn").addEventListener("click", resetAll);
+
+buildCheckboxes();
+resetAll();
+</script>
+</body>
+</html>
