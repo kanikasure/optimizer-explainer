@@ -14,34 +14,72 @@
     color: #222;
     background: #fff;
   }
+  /* Three columns that fill the window: controls, plot, text panel. */
   #layout {
     display: flex;
     gap: 16px;
     align-items: stretch;
+    height: calc(100vh - 32px);
+  }
+  #controls-panel {
+    flex: 0 0 240px;
+    width: 240px;
+    display: flex;
+    flex-direction: column;
+    gap: 32px;
   }
   #plot-panel {
-    flex: 0 0 70%;
-    max-width: 70%;
-    min-width: 0;
+    flex: 0 0 auto;  /* width is set in sizePlot() to match the square plot */
   }
   #text-panel {
     flex: 1 1 0;
     min-width: 0;
     border: 1px solid #999;
     padding: 12px 16px;
+    overflow-y: auto;
   }
   #instruction {
     margin: 0 0 8px 0;
   }
-  #plot-box {
-    border: 1px solid #999;
-    padding: 8px;
+  .lr-note {
+    margin-left: 8px;
+    color: #555;
+    font-size: 13px;
+    font-variant-numeric: tabular-nums;
   }
-  #plot-top {
+  #rotation-box {
     display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 8px;
+    align-items: center;
+    gap: 6px;
+  }
+  #rotation-slider {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  #rotation-value {
+    display: inline-block;
+    min-width: 2.2em;
+    font-variant-numeric: tabular-nums;
+  }
+  #elongation-box {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+  }
+  #elongation-label {
+    flex: 0 0 100%;
+  }
+  #elongation-box button {
+    font: inherit;
+    padding: 2px 10px;
+    cursor: pointer;
+  }
+  #elongation-box button.selected {
+    font-weight: bold;
+    background: #ddd;
+    border: 2px solid #222;
+    border-radius: 3px;
   }
   .control-box {
     border: 1px solid #999;
@@ -60,23 +98,39 @@
     border-radius: 50%;
     margin: 0 4px 0 2px;
   }
+  #run-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
   #run-box button {
     font: inherit;
-    padding: 2px 10px;
-    margin-right: 4px;
+    padding: 2px 8px;
     cursor: pointer;
   }
-  #play-btn { min-width: 64px; }
+  #play-btn { min-width: 60px; }
   #step-counter {
-    margin-left: 6px;
+    margin-top: 6px;
     font-variant-numeric: tabular-nums;
   }
+  /* The plot's width and height are set in sizePlot() from the window size. */
   #plot {
     display: block;
-    width: 100%;
-    height: auto;
     border: 1px solid #ccc;
   }
+  /* Arrow legend, in the left column under the controls, so the plot
+     can use the full window height. */
+  #legend {
+    font-size: 13px;
+    line-height: 1.3;
+  }
+  .legend-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .legend-row svg { flex: 0 0 auto; margin-top: 3px; }
   #text-panel h2 {
     margin: 0 0 8px 0;
     font-size: 18px;
@@ -97,21 +151,35 @@
 <body>
 
 <div id="layout">
+  <div id="controls-panel">
+    <div id="optimizer-box" class="control-box"></div>
+    <div id="run-box" class="control-box">
+      <div id="run-buttons">
+        <button id="play-btn" type="button">Play</button>
+        <button id="step-btn" type="button">Step (+1)</button>
+        <button id="reset-btn" type="button">Reset</button>
+      </div>
+      <div id="step-counter">Step: 0</div>
+    </div>
+    <label id="rotation-box" class="control-box">
+      Rotation:
+      <input id="rotation-slider" type="range" min="0" max="90" step="5" value="0">
+      <span id="rotation-value">0&deg;</span>
+    </label>
+    <div id="elongation-box" class="control-box">
+      <span id="elongation-label">Elongation:</span>
+      <button type="button" data-k="20">20:1</button>
+      <button type="button" data-k="50">50:1</button>
+      <button type="button" data-k="100">100:1</button>
+    </div>
+    <div id="legend"></div>
+  </div>
+
   <div id="plot-panel">
     <p id="instruction">Instruction text goes here (placeholder).</p>
-    <div id="plot-box">
-      <div id="plot-top">
-        <div id="optimizer-box" class="control-box"></div>
-        <div id="run-box" class="control-box">
-          <button id="play-btn" type="button">Play</button>
-          <button id="step-btn" type="button">Step (+1)</button>
-          <button id="reset-btn" type="button">Reset</button>
-          <span id="step-counter">Step: 0</span>
-        </div>
-      </div>
-      <canvas id="plot"></canvas>
-    </div>
+    <canvas id="plot"></canvas>
   </div>
+
 
   <div id="text-panel">
     <h2 id="focus-name"></h2>
@@ -125,20 +193,53 @@
 "use strict";
 
 // =====================================================================
-// Loss landscape (swap these two functions to add another landscape)
+// Loss landscape: a bowl with elongation K, rotated by theta.
+//   u =  cos(theta)*x1 + sin(theta)*x2
+//   w = -sin(theta)*x1 + cos(theta)*x2
+//   L = u^2 + K*w^2
+// With K = 20 and theta = 0 this is x1^2 + 20*x2^2.
 // =====================================================================
+const LANDSCAPE = { K: 20, thetaDeg: 0 };
+
 function loss(x) {
-  return x[0] * x[0] + 20 * x[1] * x[1];
+  const theta = LANDSCAPE.thetaDeg * Math.PI / 180;
+  const c = Math.cos(theta), s = Math.sin(theta);
+  const u = c * x[0] + s * x[1];
+  const w = -s * x[0] + c * x[1];
+  return u * u + LANDSCAPE.K * w * w;
 }
 
 function gradient(x) {
-  return [2 * x[0], 40 * x[1]];
+  const theta = LANDSCAPE.thetaDeg * Math.PI / 180;
+  const c = Math.cos(theta), s = Math.sin(theta);
+  const K = LANDSCAPE.K;
+  const u = c * x[0] + s * x[1];
+  const w = -s * x[0] + c * x[1];
+  return [c * 2 * u - s * 2 * K * w, s * 2 * u + c * 2 * K * w];
 }
 
-const VIEW = { x1Min: -2, x1Max: 2, x2Min: -1, x2Max: 1 };
-const START = [-1.5, 0.5];
+// The start point is always the same spot relative to the bowl:
+// (-1.5, 0.5) rotated by theta.
+function startPoint() {
+  const theta = LANDSCAPE.thetaDeg * Math.PI / 180;
+  const c = Math.cos(theta), s = Math.sin(theta);
+  return [c * -1.5 - s * 0.5, s * -1.5 + c * 0.5];
+}
+
+// Contour levels: fixed low levels near the minimum, plus levels that
+// scale with K so the steep direction is covered at every elongation.
+function contourLevels() {
+  const K = LANDSCAPE.K;
+  const levels = [0.1, 0.5, 1, 2, 4];
+  for (const f of [0.1, 0.2, 0.35, 0.5, 0.7, 0.95, 1.3, 1.7, 2.2, 2.8, 3.5]) {
+    if (f * K > 5.6) levels.push(f * K);
+  }
+  return levels;
+}
+
+const VIEW = { x1Min: -2, x1Max: 2, x2Min: -2, x2Max: 2 };
+let START = startPoint();
 const MINIMUM = [0, 0];
-const CONTOUR_LEVELS = [0.1, 0.5, 1, 2, 4, 7, 10, 14, 19];
 
 // =====================================================================
 // Optimizers
@@ -234,12 +335,19 @@ const ADAM_DETAIL_LABELS = [
 ];
 const ADAM_LEGEND_NOTE = "All three arrows are drawn at the same length (direction only).";
 
+// Learning rates depend on the elongation K (Adam's stays at 0.1).
+function setLearningRates(K) {
+  GD_PARAMS.lr = 0.8 / K;        // 0.04 at 20:1
+  MOMENTUM_PARAMS.lr = 0.2 / K;  // 0.01 at 20:1
+}
+
 const OPTIMIZERS = {
   gd: {
     name: "GD",
     color: COLORS.gd,
     init: gdInit,
     step: gdStep,
+    lr: function () { return GD_PARAMS.lr; },
     showLegend: false,
     description: "Placeholder: gradient descent (GD) description goes here."
   },
@@ -248,6 +356,7 @@ const OPTIMIZERS = {
     color: COLORS.momentum,
     init: momentumInit,
     step: momentumStep,
+    lr: function () { return MOMENTUM_PARAMS.lr; },
     showLegend: true,
     description: "Placeholder: Momentum description goes here."
   },
@@ -256,6 +365,7 @@ const OPTIMIZERS = {
     color: COLORS.adam,
     init: adamInit,
     step: adamStep,
+    lr: function () { return ADAM_PARAMS.lr; },
     showLegend: true,
     legendNote: ADAM_LEGEND_NOTE,
     detailLabels: ADAM_DETAIL_LABELS,
@@ -268,7 +378,7 @@ const OPTIMIZER_IDS = ["gd", "momentum", "adam"];
 // Simulation state
 // =====================================================================
 const STEP_INTERVAL_MS = 150;
-const MAX_PLAY_STEPS = 200;
+const MAX_PLAY_STEPS = 300;
 const STOP_LOSS = 0.001;
 
 const runs = {};          // id -> { x, state, path, stopped, last }
@@ -363,8 +473,8 @@ function stepOnce() {
 // =====================================================================
 // Drawing
 // =====================================================================
-const CANVAS_W = 1000;  // logical drawing size; same pixels-per-unit on both axes
-const CANVAS_H = 500;
+const CANVAS_W = 640;  // logical drawing size; square, same pixels-per-unit on both axes
+const CANVAS_H = 640;
 const PIXEL_SCALE = 2;  // backing-store scale for sharp lines
 const ARROW_TARGET_PX = 90;  // longest arrow of a step is drawn at least this long
 
@@ -383,7 +493,7 @@ function toPx(x) {
 // Contours are traced from loss() itself (marching squares), so a new
 // landscape only needs new loss/gradient functions and contour levels.
 function drawContours(c) {
-  const nx = 200, ny = 100;
+  const nx = 320, ny = 320;
   const dx = (VIEW.x1Max - VIEW.x1Min) / nx;
   const dy = (VIEW.x2Max - VIEW.x2Min) / ny;
   const vals = [];
@@ -402,7 +512,7 @@ function drawContours(c) {
 
   c.strokeStyle = "#b8b8b8";
   c.lineWidth = 1;
-  for (const level of CONTOUR_LEVELS) {
+  for (const level of contourLevels()) {
     c.beginPath();
     for (let j = 0; j < ny; j++) {
       for (let i = 0; i < nx; i++) {
@@ -427,17 +537,36 @@ function drawContours(c) {
   }
 }
 
-// The contours never change, so draw them once and reuse the image.
+// Light dashed x1 and x2 axis lines through (0, 0), with labels.
+function drawAxes(c) {
+  const o = toPx([0, 0]);
+  c.strokeStyle = "#c4c4c4";
+  c.lineWidth = 1.5;
+  c.setLineDash([6, 4]);
+  c.beginPath();
+  c.moveTo(0, o[1]); c.lineTo(CANVAS_W, o[1]);
+  c.moveTo(o[0], 0); c.lineTo(o[0], CANVAS_H);
+  c.stroke();
+  c.setLineDash([]);
+  c.fillStyle = "#777";
+  c.font = "italic 14px system-ui, sans-serif";
+  c.fillText("x1", CANVAS_W - 22, o[1] - 7);
+  c.fillText("x2", o[0] + 7, 16);
+}
+
+// The axes and contours only change when the landscape changes, so they
+// are drawn once per landscape into this image and reused every frame.
 const background = document.createElement("canvas");
 background.width = canvas.width;
 background.height = canvas.height;
-(function () {
+function redrawBackground() {
   const c = background.getContext("2d");
-  c.scale(PIXEL_SCALE, PIXEL_SCALE);
+  c.setTransform(PIXEL_SCALE, 0, 0, PIXEL_SCALE, 0, 0);
   c.fillStyle = "#fff";
   c.fillRect(0, 0, CANVAS_W, CANVAS_H);
+  drawAxes(c);
   drawContours(c);
-})();
+}
 
 function drawMarkers() {
   ctx.font = "13px system-ui, sans-serif";
@@ -458,7 +587,8 @@ function drawMarkers() {
   ctx.beginPath();
   ctx.arc(s[0], s[1], 7, 0, 2 * Math.PI);
   ctx.stroke();
-  ctx.fillText("start (" + START[0] + ", " + START[1] + ")", s[0] - 30, s[1] - 14);
+  const startLabel = "start (" + Number(START[0].toFixed(2)) + ", " + Number(START[1].toFixed(2)) + ")";
+  ctx.fillText(startLabel, s[0] - 30, s[1] - 14);
 }
 
 function drawPath(id) {
@@ -527,43 +657,58 @@ function drawArrows() {
     ];
     drawArrow(origin, tip, a.color, a.width || (isLast ? 3.5 : 2.5), a.head);
   });
-
-  const opt = OPTIMIZERS[arrowInfo.id];
-  if (opt.showLegend) drawLegend(arrowInfo.arrows, opt.legendNote);
 }
 
-function drawLegend(arrows, note) {
-  ctx.font = "13px system-ui, sans-serif";
-  const rowH = 20, pad = 8;
-  let textW = 0;
-  for (const a of arrows) textW = Math.max(textW, ctx.measureText(a.label).width);
-  const noteW = note ? ctx.measureText(note).width : 0;
-  const w = Math.max(pad * 2 + 34 + textW, pad * 2 + noteW);
-  const h = pad * 2 + rowH * (arrows.length + (note ? 1 : 0));
-  const x = 10, y = CANVAS_H - h - 10;
+// The arrow legend is shown in the left column under the controls (not
+// drawn on the plot), for the optimizers that have one (Momentum and Adam).
+function renderLegend() {
+  const legendEl = document.getElementById("legend");
+  legendEl.innerHTML = "";
+  if (!arrowInfo) return;
+  const opt = OPTIMIZERS[arrowInfo.id];
+  if (!opt.showLegend) return;
 
-  ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
-  ctx.fillRect(x, y, w, h);
-  ctx.strokeStyle = "#999";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(x, y, w, h);
-
-  arrows.forEach(function (a, i) {
-    const cy = y + pad + rowH * i + rowH / 2;
-    drawArrow([x + pad, cy], [x + pad + 26, cy], a.color, 2.5);
-    ctx.fillStyle = "#222";
-    ctx.textBaseline = "middle";
-    ctx.fillText(a.label, x + pad + 34, cy);
-    ctx.textBaseline = "alphabetic";
-  });
-
-  if (note) {
-    ctx.fillStyle = "#222";
-    ctx.textBaseline = "middle";
-    ctx.fillText(note, x + pad, y + pad + rowH * arrows.length + rowH / 2);
-    ctx.textBaseline = "alphabetic";
+  for (const a of arrowInfo.arrows) {
+    const row = document.createElement("div");
+    row.className = "legend-row";
+    row.innerHTML =
+      '<svg width="30" height="12" viewBox="0 0 30 12">' +
+      '<line x1="0" y1="6" x2="20" y2="6" stroke-width="2.5"></line>' +
+      '<polygon points="30,6 19,1.5 19,10.5"></polygon></svg>';
+    row.querySelector("line").setAttribute("stroke", a.color);
+    row.querySelector("polygon").setAttribute("fill", a.color);
+    const text = document.createElement("span");
+    text.textContent = a.label;
+    row.appendChild(text);
+    legendEl.appendChild(row);
+  }
+  if (opt.legendNote) {
+    const noteRow = document.createElement("div");
+    noteRow.className = "legend-row";
+    noteRow.textContent = opt.legendNote;
+    legendEl.appendChild(noteRow);
   }
 }
+
+// Size the square plot as large as the window allows: the window height
+// minus the space for the instruction line, but never so wide that the
+// right panel gets too narrow. Runs again when the window resizes.
+const PAGE_PADDING = 16, COLUMN_GAP = 16, CONTROLS_W = 240;
+const TEXT_PANEL_MIN_W = 280, PLOT_MIN_SIZE = 240;
+function sizePlot() {
+  const panel = document.getElementById("plot-panel");
+  const instruction = document.getElementById("instruction");
+  const availableW = window.innerWidth - 2 * PAGE_PADDING - CONTROLS_W - 2 * COLUMN_GAP - TEXT_PANEL_MIN_W;
+  // Two passes: the instruction line may wrap differently at the new width.
+  for (let pass = 0; pass < 2; pass++) {
+    const availableH = window.innerHeight - 2 * PAGE_PADDING - (instruction.offsetHeight + 8);
+    const size = Math.max(PLOT_MIN_SIZE, Math.floor(Math.min(availableH, availableW)));
+    panel.style.width = size + "px";
+    canvas.style.width = size + "px";
+    canvas.style.height = size + "px";
+  }
+}
+window.addEventListener("resize", sizePlot);
 
 function drawPlot() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -667,6 +812,7 @@ function renderText() {
 
 function render() {
   drawPlot();
+  renderLegend();
   renderText();
   document.getElementById("step-counter").textContent = "Step: " + stepCount;
   document.getElementById("play-btn").textContent = playTimer !== null ? "Pause" : "Play";
@@ -690,8 +836,40 @@ function buildCheckboxes() {
     label.appendChild(input);
     label.appendChild(swatch);
     label.appendChild(document.createTextNode(OPTIMIZERS[id].name));
+    const lrNote = document.createElement("span");
+    lrNote.className = "lr-note";
+    lrNote.id = "lr-" + id;
+    label.appendChild(lrNote);
     box.appendChild(label);
   }
+}
+
+// Apply the current LANDSCAPE settings: learning rates, start point,
+// contours and control labels, then reset all optimizers.
+function applyLandscape() {
+  setLearningRates(LANDSCAPE.K);
+  START = startPoint();
+  redrawBackground();
+  for (const id of OPTIMIZER_IDS) {
+    document.getElementById("lr-" + id).textContent =
+      "lr = " + Number(OPTIMIZERS[id].lr().toPrecision(3));
+  }
+  document.getElementById("rotation-value").textContent = LANDSCAPE.thetaDeg + "°";
+  for (const button of document.querySelectorAll("#elongation-box button")) {
+    button.classList.toggle("selected", Number(button.dataset.k) === LANDSCAPE.K);
+  }
+  resetAll();
+}
+
+document.getElementById("rotation-slider").addEventListener("input", function (event) {
+  LANDSCAPE.thetaDeg = Number(event.target.value);
+  applyLandscape();
+});
+for (const button of document.querySelectorAll("#elongation-box button")) {
+  button.addEventListener("click", function () {
+    LANDSCAPE.K = Number(button.dataset.k);
+    applyLandscape();
+  });
 }
 
 document.getElementById("play-btn").addEventListener("click", function () {
@@ -706,7 +884,8 @@ document.getElementById("step-btn").addEventListener("click", stepOnce);
 document.getElementById("reset-btn").addEventListener("click", resetAll);
 
 buildCheckboxes();
-resetAll();
+sizePlot();
+applyLandscape();
 </script>
 </body>
 </html>
