@@ -27,19 +27,110 @@
     display: flex;
     flex-direction: column;
     gap: 32px;
+    overflow-y: auto;  /* safety net if the controls ever outgrow the window */
+  }
+  /* Learning-rate slider under each optimizer's checkbox (log scale). */
+  .lr-row {
+    display: flex;
+    align-items: center;
+    margin: 0 0 6px 22px;
+  }
+  .lr-row input[type="range"] {
+    flex: 1 1 0;
+    min-width: 0;
+    margin: 0;
+  }
+  #same-lr-label {
+    display: block;
+    cursor: pointer;
+    margin-top: 4px;
+    padding-top: 6px;
+    border-top: 1px solid #ddd;
+    font-size: 13px;
   }
   #plot-panel {
     flex: 0 0 auto;  /* width is set in sizePlot() to match the square plot */
   }
-  #text-panel {
+  /* Right column: tour panel on top, values panel below. */
+  #right-column {
     flex: 1 1 0;
     min-width: 0;
-    border: 1px solid #999;
-    padding: 12px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
     overflow-y: auto;
   }
-  #instruction {
+  #tour-panel {
+    flex: 0 0 auto;
+    border: 1px solid #999;
+    padding: 12px 16px;
+  }
+  #text-panel {
+    flex: 1 0 auto;
+    border: 1px solid #999;
+    padding: 12px 16px;
+  }
+  #tour-progress {
+    color: #555;
+    font-size: 13px;
+    margin-bottom: 4px;
+  }
+  #tour-question {
     margin: 0 0 8px 0;
+    font-weight: 600;
+  }
+  #tour-options {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    margin-bottom: 8px;
+  }
+  #tour-options button, #tour-buttons button {
+    font: inherit;
+    padding: 2px 10px;
+    cursor: pointer;
+    text-align: left;
+  }
+  #tour-options button.selected {
+    font-weight: bold;
+    background: #ddd;
+    color: #222;
+    border: 2px solid #222;
+    border-radius: 3px;
+  }
+  #tour-reveal {
+    margin: 8px 0;
+    padding: 8px 10px;
+    background: #f3f3f3;
+    border-left: 3px solid #999;
+  }
+  #tour-reveal p { margin: 0 0 8px 0; }
+  #tour-reveal p:last-child { margin-bottom: 0; }
+  #tour-reveal table {
+    border-collapse: collapse;
+    margin: 0 0 8px 0;
+    font-variant-numeric: tabular-nums;
+  }
+  #tour-reveal th, #tour-reveal td {
+    padding: 2px 14px 2px 0;
+    text-align: left;
+    font-weight: normal;
+  }
+  #tour-reveal th { color: #555; }
+  #tour-instruction {
+    margin: 8px 0;
+  }
+  #tour-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+  }
+  #tour-nav {
+    margin-left: auto;
+    display: flex;
+    gap: 6px;
   }
   .lr-note {
     margin-left: 8px;
@@ -70,12 +161,17 @@
   #elongation-label {
     flex: 0 0 100%;
   }
-  #elongation-box button {
+  #speed-box {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #elongation-box button, #speed-box button {
     font: inherit;
     padding: 2px 10px;
     cursor: pointer;
   }
-  #elongation-box button.selected {
+  #elongation-box button.selected, #speed-box button.selected {
     font-weight: bold;
     background: #ddd;
     border: 2px solid #222;
@@ -131,7 +227,7 @@
     margin-bottom: 6px;
   }
   .legend-row svg { flex: 0 0 auto; margin-top: 3px; }
-  #text-panel h2 {
+  #right-column h2 {
     margin: 0 0 8px 0;
     font-size: 18px;
   }
@@ -161,6 +257,11 @@
       </div>
       <div id="step-counter">Step: 0</div>
     </div>
+    <div id="speed-box" class="control-box">
+      <span>Speed:</span>
+      <button type="button" data-speed="normal">Normal</button>
+      <button type="button" data-speed="fast">Fast</button>
+    </div>
     <label id="rotation-box" class="control-box">
       Rotation:
       <input id="rotation-slider" type="range" min="0" max="90" step="5" value="0">
@@ -176,21 +277,115 @@
   </div>
 
   <div id="plot-panel">
-    <p id="instruction">Instruction text goes here (placeholder).</p>
     <canvas id="plot"></canvas>
   </div>
 
 
-  <div id="text-panel">
-    <h2 id="focus-name"></h2>
-    <p id="focus-description"></p>
-    <table id="values"></table>
-    <p id="status"></p>
+  <div id="right-column">
+    <div id="tour-panel">
+      <div id="tour-progress"></div>
+      <h2 id="tour-title"></h2>
+      <p id="tour-question"></p>
+      <div id="tour-options"></div>
+      <div id="tour-reveal"></div>
+      <p id="tour-instruction"></p>
+      <div id="tour-buttons">
+        <button id="tour-reveal-btn" type="button">Show explanation</button>
+        <div id="tour-nav">
+          <button id="tour-back-btn" type="button">Back</button>
+          <button id="tour-next-btn" type="button">Next</button>
+        </div>
+      </div>
+    </div>
+    <div id="text-panel">
+      <h2 id="focus-name"></h2>
+      <p id="focus-description"></p>
+      <table id="values"></table>
+      <p id="status"></p>
+    </div>
   </div>
 </div>
 
 <script>
 "use strict";
+
+// =====================================================================
+// Guided tour: ALL tour text lives in this array and nowhere else.
+// Every string the learner reads is marked "DRAFT: " (to be rewritten).
+//
+// Each step has:
+//   title, question, instruction, reveal   text shown in the tour panel
+//   preset        settings applied on entering the step (null = keep
+//                 the current settings): elongation (K), rotation
+//                 (degrees), optimizers (checked ids), speed
+//   revealAfter   what enables "Show explanation":
+//                 "step"          Step (+1) pressed at least once
+//                 "finish"        the run has finished
+//                 "rotate-finish" a prediction is picked, rotation is at
+//                                 targetRotation, and the run has finished
+//                 null            the step has no explanation
+// The prediction step also has: options (answer buttons), correctOption
+// (index into options), matchText / mismatchText, targetRotation.
+// =====================================================================
+const TOUR_STEPS = [
+  {
+    title: "DRAFT: Gradient descent",
+    question: "DRAFT: Why doesn't gradient descent head straight for the minimum?",
+    instruction: "DRAFT: Press Step a few times and watch the arrow.",
+    reveal: "DRAFT: The negative gradient points across the valley, not along it.",
+    preset: { elongation: 100, rotation: 0, optimizers: ["gd"], speed: "normal" },
+    revealAfter: "step"
+  },
+  {
+    title: "DRAFT: Momentum",
+    question: "DRAFT: What does the carried-over arrow change?",
+    instruction: "DRAFT: Press Step several times.",
+    reveal: "DRAFT: The step is the sum of the new gradient part and what is carried over from earlier steps.",
+    preset: { elongation: 100, rotation: 0, optimizers: ["momentum"], speed: "normal" },
+    revealAfter: "step"
+  },
+  {
+    title: "DRAFT: Adam",
+    question: "DRAFT: Adam's step doesn't point along -g either. Why?",
+    instruction: "DRAFT: Press Step once and compare the arrows.",
+    reveal: "DRAFT: Adam divides each coordinate by its own sqrt(s_hat), so both coordinates move by about the same amount. That turns the step, it doesn't only resize it.",
+    preset: { elongation: 100, rotation: 0, optimizers: ["adam"], speed: "normal" },
+    revealAfter: "step"
+  },
+  {
+    title: "DRAFT: Race",
+    question: "DRAFT: Which optimizer reaches the minimum first?",
+    instruction: "DRAFT: Press Play.",
+    reveal: "DRAFT: Adam finishes first on this bowl.",
+    preset: { elongation: 100, rotation: 0, optimizers: ["gd", "momentum", "adam"], speed: "fast" },
+    revealAfter: "finish"
+  },
+  {
+    title: "DRAFT: Rotate the bowl",
+    question: "DRAFT: Prediction: if we rotate the same bowl by 45 degrees, what changes?",
+    options: [
+      "DRAFT: Nothing changes",
+      "DRAFT: All three get slower",
+      "DRAFT: Only one optimizer changes"
+    ],
+    correctOption: 2,
+    matchText: "DRAFT: Your prediction matched what happened.",
+    mismatchText: "DRAFT: Your prediction did not match what happened.",
+    instruction: "DRAFT: Drag Rotation to 45 degrees and press Play.",
+    reveal: "DRAFT: GD and momentum use the gradient as a whole vector, so their paths just rotate with the bowl. Adam works coordinate by coordinate, so it depends on the bowl's angle relative to the x1 and x2 axes.",
+    preset: { elongation: 100, rotation: 0, optimizers: ["gd", "momentum", "adam"], speed: "fast" },
+    revealAfter: "rotate-finish",
+    targetRotation: 45
+  },
+  {
+    title: "DRAFT: Free play",
+    question: "",
+    instruction: "DRAFT: Try any settings you like.",
+    reveal: "",
+    preset: null,
+    revealAfter: null
+  }
+];
 
 // =====================================================================
 // Loss landscape: a bowl with elongation K, rotated by theta.
@@ -335,10 +530,13 @@ const ADAM_DETAIL_LABELS = [
 ];
 const ADAM_LEGEND_NOTE = "All three arrows are drawn at the same length (direction only).";
 
-// Learning rates depend on the elongation K (Adam's stays at 0.1).
+// Default learning rates depend on the elongation K (Adam's stays at 0.1).
+// The learner can change them with the sliders; changing the elongation
+// or entering a tour step sets them back to these defaults.
 function setLearningRates(K) {
   GD_PARAMS.lr = 0.8 / K;        // 0.04 at 20:1
   MOMENTUM_PARAMS.lr = 0.2 / K;  // 0.01 at 20:1
+  ADAM_PARAMS.lr = 0.1;
 }
 
 const OPTIMIZERS = {
@@ -348,6 +546,7 @@ const OPTIMIZERS = {
     init: gdInit,
     step: gdStep,
     lr: function () { return GD_PARAMS.lr; },
+    setLr: function (lr) { GD_PARAMS.lr = lr; },
     showLegend: false,
     description: "Placeholder: gradient descent (GD) description goes here."
   },
@@ -357,6 +556,7 @@ const OPTIMIZERS = {
     init: momentumInit,
     step: momentumStep,
     lr: function () { return MOMENTUM_PARAMS.lr; },
+    setLr: function (lr) { MOMENTUM_PARAMS.lr = lr; },
     showLegend: true,
     description: "Placeholder: Momentum description goes here."
   },
@@ -366,6 +566,7 @@ const OPTIMIZERS = {
     init: adamInit,
     step: adamStep,
     lr: function () { return ADAM_PARAMS.lr; },
+    setLr: function (lr) { ADAM_PARAMS.lr = lr; },
     showLegend: true,
     legendNote: ADAM_LEGEND_NOTE,
     detailLabels: ADAM_DETAIL_LABELS,
@@ -377,7 +578,8 @@ const OPTIMIZER_IDS = ["gd", "momentum", "adam"];
 // =====================================================================
 // Simulation state
 // =====================================================================
-const STEP_INTERVAL_MS = 150;
+const SPEEDS = { normal: 150, fast: 30 };  // ms per step while playing
+let playSpeed = "normal";
 const MAX_PLAY_STEPS = 300;
 const STOP_LOSS = 0.001;
 
@@ -385,7 +587,9 @@ const runs = {};          // id -> { x, state, path, stopped, last }
 let checkOrder = ["gd"];  // checked ids, oldest first (last one = most recently checked)
 let stepCount = 0;
 let playTimer = null;
-let arrowInfo = null;     // { id, origin, arrows } for the latest single-optimizer Step
+// Arrows for the latest step, one entry per optimizer that is still
+// moving: { id, origin, arrows }. Each new step replaces them.
+let arrowSets = [];
 
 function isChecked(id) {
   return checkOrder.indexOf(id) !== -1;
@@ -407,11 +611,12 @@ function resetAll() {
       state: OPTIMIZERS[id].init(),
       path: [START.slice()],
       stopped: false,
+      diverged: false,
       last: null
     };
   }
   stepCount = 0;
-  arrowInfo = null;
+  arrowSets = [];  // no arrows until the first step
   render();
 }
 
@@ -421,24 +626,37 @@ function allStopped() {
 }
 
 // Advance every checked optimizer that is still moving by one step.
-// Returns false if nothing could move.
-function advance(showArrows) {
+// Returns false if nothing could move. Replaces the arrows with ones for
+// this step, drawn at each optimizer's new (current) point.
+function advance() {
   const ids = checkedIds();
   if (ids.length === 0 || allStopped()) return false;
 
-  arrowInfo = null;
+  arrowSets = [];
   for (const id of ids) {
     const run = runs[id];
     if (run.stopped) continue;
-    const origin = run.x.slice();
     const g = gradient(run.x);
     const result = OPTIMIZERS[id].step(run.state, g);
     run.x = [run.x[0] + result.step[0], run.x[1] + result.step[1]];
-    run.path.push(run.x.slice());
+    // Only finite points go into the drawn path (a NaN point can't be drawn).
+    if (isFinite(run.x[0]) && isFinite(run.x[1])) run.path.push(run.x.slice());
     run.last = { gradient: g, step: result.step, details: result.details };
-    if (loss(run.x) < STOP_LOSS) run.stopped = true;
-    if (showArrows && ids.length === 1) {
-      arrowInfo = { id: id, origin: origin, arrows: result.arrows };
+    const L = loss(run.x);
+    if (isDiverged(L)) {
+      run.diverged = true;  // stop it; the others keep going
+      run.stopped = true;
+    } else if (L < STOP_LOSS) {
+      run.stopped = true;
+    }
+    // Stopped or diverged optimizers get no arrows.
+    if (!run.stopped) {
+      // One optimizer checked: its full set of arrows. Two or three: only
+      // the step taken (the last arrow), in the optimizer's path color.
+      const arrows = ids.length === 1
+        ? result.arrows
+        : [Object.assign({}, result.arrows[result.arrows.length - 1], { color: OPTIMIZERS[id].color })];
+      arrowSets.push({ id: id, origin: run.x.slice(), arrows: arrows });
     }
   }
   stepCount += 1;
@@ -448,13 +666,62 @@ function advance(showArrows) {
 function play() {
   if (playTimer !== null) return;
   if (checkedIds().length === 0 || allStopped() || stepCount >= MAX_PLAY_STEPS) return;
-  arrowInfo = null;  // no arrows while playing
-  playTimer = setInterval(function () {
-    advance(false);
-    if (allStopped() || stepCount >= MAX_PLAY_STEPS) pause();
-    render();
-  }, STEP_INTERVAL_MS);
+  playTimer = setInterval(playTick, SPEEDS[playSpeed]);
   render();
+}
+
+function playTick() {
+  advance();
+  if (allStopped() || stepCount >= MAX_PLAY_STEPS) pause();
+  render();
+}
+
+// Switch between Normal and Fast; takes effect immediately if playing.
+function setSpeed(name) {
+  playSpeed = name;
+  for (const button of document.querySelectorAll("#speed-box button")) {
+    button.classList.toggle("selected", button.dataset.speed === playSpeed);
+  }
+  if (playTimer !== null) {
+    clearInterval(playTimer);
+    playTimer = setInterval(playTick, SPEEDS[playSpeed]);
+  }
+}
+
+// A run has finished when every checked optimizer has stopped, or the
+// step limit has been reached.
+function runFinished() {
+  return checkedIds().length > 0 && stepCount > 0 &&
+    (allStopped() || stepCount >= MAX_PLAY_STEPS);
+}
+
+// An optimizer has diverged if its loss goes above 1e6 or becomes NaN.
+const DIVERGE_LOSS = 1e6;
+function isDiverged(L) {
+  return isNaN(L) || L > DIVERGE_LOSS;
+}
+
+// Run one optimizer in the background (nothing is drawn) on the current
+// bowl rotated to thetaDeg. Returns the number of steps it needs to get
+// below the stop loss, null if it does not get there within the limit,
+// or "diverged" if it diverges.
+function stepsToFinish(id, thetaDeg) {
+  const savedTheta = LANDSCAPE.thetaDeg;
+  LANDSCAPE.thetaDeg = thetaDeg;
+  try {
+    let x = startPoint();
+    const state = OPTIMIZERS[id].init();
+    let n = 0;
+    while (loss(x) >= STOP_LOSS && n < MAX_PLAY_STEPS) {
+      const result = OPTIMIZERS[id].step(state, gradient(x));
+      x = [x[0] + result.step[0], x[1] + result.step[1]];
+      n += 1;
+      if (isDiverged(loss(x))) return "diverged";
+    }
+    return loss(x) < STOP_LOSS ? n : null;
+  } finally {
+    LANDSCAPE.thetaDeg = savedTheta;
+  }
 }
 
 function pause() {
@@ -466,7 +733,8 @@ function pause() {
 
 function stepOnce() {
   pause();
-  advance(true);
+  advance();
+  tour.stepPressed = true;
   render();
 }
 
@@ -568,21 +836,37 @@ function redrawBackground() {
   drawContours(c);
 }
 
-function drawMarkers() {
+// Minimum: a cross and label. Drawn on top of the paths, with a white
+// outline, so it stays visible at the end of a run.
+function drawMinimumMarker() {
+  const m = toPx(MINIMUM);
+  const label = "minimum (0, 0)";
+  ctx.font = "13px system-ui, sans-serif";
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
+  for (const pass of [{ color: "#fff", width: 5 }, { color: "#222", width: 2 }]) {
+    ctx.strokeStyle = pass.color;
+    ctx.lineWidth = pass.width;
+    ctx.beginPath();
+    ctx.moveTo(m[0] - 6, m[1] - 6); ctx.lineTo(m[0] + 6, m[1] + 6);
+    ctx.moveTo(m[0] - 6, m[1] + 6); ctx.lineTo(m[0] + 6, m[1] - 6);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "#fff";
+  ctx.lineWidth = 3;
+  ctx.strokeText(label, m[0] + 10, m[1] + 18);
+  ctx.fillStyle = "#222";
+  ctx.fillText(label, m[0] + 10, m[1] + 18);
+  ctx.lineJoin = "miter";
+  ctx.lineCap = "butt";
+}
+
+// Start: a ring and label.
+function drawStartMarker() {
   ctx.font = "13px system-ui, sans-serif";
   ctx.fillStyle = "#222";
   ctx.strokeStyle = "#222";
   ctx.lineWidth = 2;
-
-  // minimum: a cross
-  const m = toPx(MINIMUM);
-  ctx.beginPath();
-  ctx.moveTo(m[0] - 6, m[1] - 6); ctx.lineTo(m[0] + 6, m[1] + 6);
-  ctx.moveTo(m[0] - 6, m[1] + 6); ctx.lineTo(m[0] + 6, m[1] - 6);
-  ctx.stroke();
-  ctx.fillText("minimum (0, 0)", m[0] + 10, m[1] + 18);
-
-  // start: a ring
   const s = toPx(START);
   ctx.beginPath();
   ctx.arc(s[0], s[1], 7, 0, 2 * Math.PI);
@@ -633,20 +917,24 @@ function drawArrow(from, to, color, width, headSize) {
 }
 
 function drawArrows() {
-  if (!arrowInfo) return;
+  for (const set of arrowSets) drawArrowSet(set);
+}
+
+// Draw one optimizer's arrows, starting at its current point.
+function drawArrowSet(set) {
   const pxPerUnit = CANVAS_W / (VIEW.x1Max - VIEW.x1Min);
-  const origin = toPx(arrowInfo.origin);
+  const origin = toPx(set.origin);
 
   // One common scale factor for all arrows of this step.
   let longest = 0;
-  for (const a of arrowInfo.arrows) {
+  for (const a of set.arrows) {
     longest = Math.max(longest, Math.hypot(a.vec[0], a.vec[1]) * pxPerUnit);
   }
-  if (longest === 0) return;
+  if (!(longest > 0)) return;
   const factor = Math.max(1, ARROW_TARGET_PX / longest);
 
-  arrowInfo.arrows.forEach(function (a, i) {
-    const isLast = i === arrowInfo.arrows.length - 1;  // the step actually taken
+  set.arrows.forEach(function (a, i) {
+    const isLast = i === set.arrows.length - 1;  // the step actually taken
     // Fixed-length arrows show direction only; the others share `factor`.
     const lengthPx = Math.hypot(a.vec[0], a.vec[1]) * pxPerUnit;
     if (lengthPx === 0) return;
@@ -664,11 +952,13 @@ function drawArrows() {
 function renderLegend() {
   const legendEl = document.getElementById("legend");
   legendEl.innerHTML = "";
-  if (!arrowInfo) return;
-  const opt = OPTIMIZERS[arrowInfo.id];
+  // Only when exactly one optimizer is checked (and it has arrows showing).
+  if (checkedIds().length !== 1 || arrowSets.length !== 1) return;
+  const set = arrowSets[0];
+  const opt = OPTIMIZERS[set.id];
   if (!opt.showLegend) return;
 
-  for (const a of arrowInfo.arrows) {
+  for (const a of set.arrows) {
     const row = document.createElement("div");
     row.className = "legend-row";
     row.innerHTML =
@@ -690,23 +980,19 @@ function renderLegend() {
   }
 }
 
-// Size the square plot as large as the window allows: the window height
-// minus the space for the instruction line, but never so wide that the
-// right panel gets too narrow. Runs again when the window resizes.
+// Size the square plot as large as the window allows: the full window
+// height inside the page padding, but never so wide that the right
+// column gets too narrow. Runs again when the window resizes.
 const PAGE_PADDING = 16, COLUMN_GAP = 16, CONTROLS_W = 240;
 const TEXT_PANEL_MIN_W = 280, PLOT_MIN_SIZE = 240;
 function sizePlot() {
   const panel = document.getElementById("plot-panel");
-  const instruction = document.getElementById("instruction");
   const availableW = window.innerWidth - 2 * PAGE_PADDING - CONTROLS_W - 2 * COLUMN_GAP - TEXT_PANEL_MIN_W;
-  // Two passes: the instruction line may wrap differently at the new width.
-  for (let pass = 0; pass < 2; pass++) {
-    const availableH = window.innerHeight - 2 * PAGE_PADDING - (instruction.offsetHeight + 8);
-    const size = Math.max(PLOT_MIN_SIZE, Math.floor(Math.min(availableH, availableW)));
-    panel.style.width = size + "px";
-    canvas.style.width = size + "px";
-    canvas.style.height = size + "px";
-  }
+  const availableH = window.innerHeight - 2 * PAGE_PADDING;
+  const size = Math.max(PLOT_MIN_SIZE, Math.floor(Math.min(availableH, availableW)));
+  panel.style.width = size + "px";
+  canvas.style.width = size + "px";
+  canvas.style.height = size + "px";
 }
 window.addEventListener("resize", sizePlot);
 
@@ -714,8 +1000,9 @@ function drawPlot() {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(background, 0, 0);
   ctx.setTransform(PIXEL_SCALE, 0, 0, PIXEL_SCALE, 0, 0);
-  drawMarkers();
+  drawStartMarker();
   for (const id of checkedIds()) drawPath(id);
+  drawMinimumMarker();  // on top of the paths
   drawArrows();
 }
 
@@ -766,7 +1053,7 @@ function renderText() {
       const cells = [
         "step " + (r.path.length - 1),
         "loss " + fmt(loss(r.x)),
-        r.stopped ? "stopped" : ""
+        r.diverged ? "diverged" : r.stopped ? "stopped" : ""
       ];
       for (const cell of cells) {
         const td = document.createElement("td");
@@ -807,7 +1094,11 @@ function renderText() {
     }
     valuesEl.appendChild(tr);
   }
-  if (run.stopped) statusEl.textContent = "Stopped: loss is below " + STOP_LOSS + ".";
+  if (run.diverged) {
+    statusEl.textContent = "Diverged: loss went above " + DIVERGE_LOSS + " or became NaN.";
+  } else if (run.stopped) {
+    statusEl.textContent = "Stopped: loss is below " + STOP_LOSS + ".";
+  }
 }
 
 function render() {
@@ -816,6 +1107,7 @@ function render() {
   renderText();
   document.getElementById("step-counter").textContent = "Step: " + stepCount;
   document.getElementById("play-btn").textContent = playTimer !== null ? "Pause" : "Play";
+  updateTour();
 }
 
 function buildCheckboxes() {
@@ -824,6 +1116,7 @@ function buildCheckboxes() {
     const label = document.createElement("label");
     const input = document.createElement("input");
     input.type = "checkbox";
+    input.id = "check-" + id;
     input.checked = isChecked(id);
     input.addEventListener("change", function () {
       checkOrder = checkOrder.filter(function (other) { return other !== id; });
@@ -841,19 +1134,99 @@ function buildCheckboxes() {
     lrNote.id = "lr-" + id;
     label.appendChild(lrNote);
     box.appendChild(label);
+
+    // Learning-rate slider under the checkbox.
+    const row = makeLrSlider("lr-slider-" + id, function (lr) {
+      OPTIMIZERS[id].setLr(lr);
+      syncLrControls();
+      resetAll();  // changing a learning rate resets the optimizers
+    });
+    row.id = "lr-row-" + id;
+    box.appendChild(row);
   }
+
+  // "Same learning rate for all": one shared slider replaces the three.
+  const sameLabel = document.createElement("label");
+  sameLabel.id = "same-lr-label";
+  const sameInput = document.createElement("input");
+  sameInput.type = "checkbox";
+  sameInput.id = "same-lr";
+  sameInput.addEventListener("change", function () {
+    if (sameInput.checked) {
+      // Start the shared value from the optimizer in focus (or GD).
+      const lr = OPTIMIZERS[focusId() || "gd"].lr();
+      for (const id of OPTIMIZER_IDS) OPTIMIZERS[id].setLr(lr);
+      syncLrControls();
+      resetAll();
+    } else {
+      syncLrControls();  // each keeps the shared value until changed
+    }
+  });
+  sameLabel.appendChild(sameInput);
+  sameLabel.appendChild(document.createTextNode(" Same learning rate for all"));
+  box.appendChild(sameLabel);
+
+  const sharedRow = makeLrSlider("lr-slider-all", function (lr) {
+    for (const id of OPTIMIZER_IDS) OPTIMIZERS[id].setLr(lr);
+    syncLrControls();
+    resetAll();
+  });
+  sharedRow.id = "lr-row-all";
+  box.appendChild(sharedRow);
 }
 
-// Apply the current LANDSCAPE settings: learning rates, start point,
-// contours and control labels, then reset all optimizers.
-function applyLandscape() {
+// Log-scale learning-rate slider: the slider value is log10(lr), from
+// -4 to 0 (lr 0.0001 to 1.0) in steps of 0.05.
+const LR_LOG_MIN = -4, LR_LOG_MAX = 0, LR_LOG_STEP = 0.05;
+function makeLrSlider(sliderId, onChange) {
+  const row = document.createElement("div");
+  row.className = "lr-row";
+  const slider = document.createElement("input");
+  slider.type = "range";
+  slider.id = sliderId;
+  slider.min = LR_LOG_MIN;
+  slider.max = LR_LOG_MAX;
+  slider.step = LR_LOG_STEP;
+  slider.addEventListener("input", function () {
+    onChange(Number(Math.pow(10, Number(slider.value)).toPrecision(3)));
+  });
+  row.appendChild(slider);
+  return row;
+}
+
+function formatLr(lr) {
+  return String(Number(lr.toPrecision(3)));
+}
+
+// Update the learning-rate labels and sliders to the current values, and
+// show either the three sliders or the shared one.
+function syncLrControls() {
+  const same = document.getElementById("same-lr").checked;
+  for (const id of OPTIMIZER_IDS) {
+    const lr = OPTIMIZERS[id].lr();
+    document.getElementById("lr-" + id).textContent = "lr = " + formatLr(lr);
+    document.getElementById("lr-slider-" + id).value = Math.log10(lr);
+    document.getElementById("lr-row-" + id).style.display = same ? "none" : "";
+  }
+  document.getElementById("lr-slider-all").value = Math.log10(OPTIMIZERS.gd.lr());
+  document.getElementById("lr-row-all").style.display = same ? "" : "none";
+}
+
+// Back to the default learning rates for the current elongation, each
+// optimizer with its own slider.
+function resetLearningRates() {
   setLearningRates(LANDSCAPE.K);
+  document.getElementById("same-lr").checked = false;
+  syncLrControls();
+}
+
+// Apply the current LANDSCAPE settings: start point, contours and
+// control labels, then reset all optimizers. (Learning rates are not
+// touched here: rotating keeps them; elongation resets them separately.)
+function applyLandscape() {
   START = startPoint();
   redrawBackground();
-  for (const id of OPTIMIZER_IDS) {
-    document.getElementById("lr-" + id).textContent =
-      "lr = " + Number(OPTIMIZERS[id].lr().toPrecision(3));
-  }
+  syncLrControls();
   document.getElementById("rotation-value").textContent = LANDSCAPE.thetaDeg + "°";
   for (const button of document.querySelectorAll("#elongation-box button")) {
     button.classList.toggle("selected", Number(button.dataset.k) === LANDSCAPE.K);
@@ -868,7 +1241,14 @@ document.getElementById("rotation-slider").addEventListener("input", function (e
 for (const button of document.querySelectorAll("#elongation-box button")) {
   button.addEventListener("click", function () {
     LANDSCAPE.K = Number(button.dataset.k);
+    resetLearningRates();  // changing the elongation sets the defaults again
     applyLandscape();
+  });
+}
+
+for (const button of document.querySelectorAll("#speed-box button")) {
+  button.addEventListener("click", function () {
+    setSpeed(button.dataset.speed);
   });
 }
 
@@ -883,9 +1263,158 @@ document.getElementById("play-btn").addEventListener("click", function () {
 document.getElementById("step-btn").addEventListener("click", stepOnce);
 document.getElementById("reset-btn").addEventListener("click", resetAll);
 
+// =====================================================================
+// Guided tour (the text is in TOUR_STEPS at the top of the script)
+// =====================================================================
+const tour = {
+  index: 0,
+  stepPressed: false,  // Step (+1) pressed since entering this tour step
+  actionDone: false,   // the step's action is done: "Show explanation" is enabled
+  revealed: false,     // the explanation is showing
+  prediction: null     // index of the answer picked on the prediction step
+};
+
+// Set the controls to a tour step's preset, redraw and reset.
+function applyPreset(preset) {
+  LANDSCAPE.K = preset.elongation;
+  LANDSCAPE.thetaDeg = preset.rotation;
+  checkOrder = preset.optimizers.slice();
+  for (const id of OPTIMIZER_IDS) {
+    document.getElementById("check-" + id).checked = isChecked(id);
+  }
+  document.getElementById("rotation-slider").value = preset.rotation;
+  setSpeed(preset.speed);
+  resetLearningRates();  // tour presets use the default learning rates
+  applyLandscape();
+}
+
+// Go to a tour step: show its text, clear its progress, apply its preset.
+function enterTourStep(index) {
+  const step = TOUR_STEPS[index];
+  tour.index = index;
+  tour.stepPressed = false;
+  tour.actionDone = false;
+  tour.revealed = false;
+  tour.prediction = null;
+
+  document.getElementById("tour-progress").textContent =
+    "Step " + (index + 1) + " of " + TOUR_STEPS.length;
+  document.getElementById("tour-title").textContent = step.title;
+  document.getElementById("tour-question").textContent = step.question;
+  document.getElementById("tour-instruction").textContent = step.instruction;
+  document.getElementById("tour-reveal").innerHTML = "";
+
+  // Answer buttons (prediction step only). Built once per step, not on
+  // every redraw, so clicks are not lost while a run is playing.
+  const optionsEl = document.getElementById("tour-options");
+  optionsEl.innerHTML = "";
+  (step.options || []).forEach(function (text, i) {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.textContent = text;
+    button.addEventListener("click", function () {
+      tour.prediction = i;
+      for (const other of optionsEl.querySelectorAll("button")) {
+        other.disabled = true;
+        other.classList.toggle("selected", other === button);
+      }
+      updateTour();
+    });
+    optionsEl.appendChild(button);
+  });
+
+  if (step.preset) applyPreset(step.preset); else render();
+}
+
+// Called on every redraw: check whether the step's action has been done
+// and show, hide, enable or disable the tour panel's parts to match.
+function updateTour() {
+  const step = TOUR_STEPS[tour.index];
+  if (!tour.actionDone) {
+    if (step.revealAfter === "step") {
+      tour.actionDone = tour.stepPressed;
+    } else if (step.revealAfter === "finish") {
+      tour.actionDone = runFinished();
+    } else if (step.revealAfter === "rotate-finish") {
+      tour.actionDone = tour.prediction !== null &&
+        LANDSCAPE.thetaDeg === step.targetRotation && runFinished();
+    }
+  }
+
+  const revealBtn = document.getElementById("tour-reveal-btn");
+  revealBtn.style.display = step.revealAfter && !tour.revealed ? "" : "none";
+  revealBtn.disabled = !tour.actionDone;
+
+  document.getElementById("tour-question").style.display = step.question ? "" : "none";
+  document.getElementById("tour-options").style.display = step.options ? "" : "none";
+  document.getElementById("tour-reveal").style.display = tour.revealed ? "" : "none";
+  // On the prediction step the instruction appears after an answer is picked.
+  const showInstruction = !step.options || tour.prediction !== null;
+  document.getElementById("tour-instruction").style.display = showInstruction ? "" : "none";
+
+  document.getElementById("tour-back-btn").disabled = tour.index === 0;
+  document.getElementById("tour-next-btn").disabled = tour.index === TOUR_STEPS.length - 1;
+}
+
+// Table of steps-to-finish for each optimizer at 0 degrees and at the
+// step's target rotation, computed by running them in the background.
+function buildStepsTable(angles) {
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  for (const text of [""].concat(angles.map(function (a) { return "steps at " + a + "\u00B0"; }))) {
+    const th = document.createElement("th");
+    th.textContent = text;
+    head.appendChild(th);
+  }
+  table.appendChild(head);
+  for (const id of OPTIMIZER_IDS) {
+    const tr = document.createElement("tr");
+    const nameTd = document.createElement("td");
+    const swatch = document.createElement("span");
+    swatch.className = "swatch";
+    swatch.style.background = OPTIMIZERS[id].color;
+    nameTd.appendChild(swatch);
+    nameTd.appendChild(document.createTextNode(OPTIMIZERS[id].name));
+    tr.appendChild(nameTd);
+    for (const angle of angles) {
+      const n = stepsToFinish(id, angle);
+      const td = document.createElement("td");
+      td.textContent = n === null ? "more than " + MAX_PLAY_STEPS : String(n);
+      tr.appendChild(td);
+    }
+    table.appendChild(tr);
+  }
+  return table;
+}
+
+function showReveal() {
+  const step = TOUR_STEPS[tour.index];
+  const revealEl = document.getElementById("tour-reveal");
+  revealEl.innerHTML = "";
+  if (step.options) {
+    const verdict = document.createElement("p");
+    verdict.textContent = tour.prediction === step.correctOption ? step.matchText : step.mismatchText;
+    revealEl.appendChild(verdict);
+    revealEl.appendChild(buildStepsTable([0, step.targetRotation]));
+  }
+  const text = document.createElement("p");
+  text.textContent = step.reveal;
+  revealEl.appendChild(text);
+  tour.revealed = true;
+  updateTour();
+}
+
+document.getElementById("tour-reveal-btn").addEventListener("click", showReveal);
+document.getElementById("tour-back-btn").addEventListener("click", function () {
+  if (tour.index > 0) enterTourStep(tour.index - 1);
+});
+document.getElementById("tour-next-btn").addEventListener("click", function () {
+  if (tour.index < TOUR_STEPS.length - 1) enterTourStep(tour.index + 1);
+});
+
 buildCheckboxes();
 sizePlot();
-applyLandscape();
+enterTourStep(0);  // applies the first step's preset, which also draws everything
 </script>
 </body>
 </html>
