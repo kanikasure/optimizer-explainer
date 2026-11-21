@@ -1,0 +1,701 @@
+/* =====================================================================
+   Theme
+   ===================================================================== */
+:root {
+  --bg: #0f1115;          /* page */
+  --panel: #171a21;       /* panels and widgets */
+  --panel-2: #1d212a;     /* slightly lighter panel ("What happened?") */
+  --border: #262b36;
+  --text: #e6e8ee;
+  --muted: #9aa3b2;
+  --accent: #a78bfa;      /* selected options, "What happened?" border */
+  --button: #222733;
+  --button-hover: #2b3140;
+  --button-border: #313848;
+  --radius: 12px;
+}
+
+* { box-sizing: border-box; }
+html { background: var(--bg); scroll-behavior: smooth; }
+body {
+  margin: 0;
+  padding: 16px;
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--text);
+  /* Soft colored glows behind the page. */
+  background:
+    radial-gradient(900px 520px at 12% -6%, rgba(167, 139, 250, 0.13), transparent 62%),
+    radial-gradient(800px 480px at 95% 4%, rgba(91, 156, 255, 0.10), transparent 60%),
+    radial-gradient(700px 600px at 50% 110%, rgba(61, 220, 132, 0.05), transparent 60%),
+    var(--bg);
+  background-attachment: fixed;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: rgba(167, 139, 250, 0.35); }
+/* Dark scrollbars. */
+html { scrollbar-color: #2b3140 var(--bg); }
+input[type="range"], input[type="checkbox"] { accent-color: var(--accent); }
+
+/* Buttons: rounded, subtle hover, selected option in the accent color. */
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--button);
+  border: 1px solid var(--button-border);
+  border-radius: 8px;
+  padding: 3px 12px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+button:hover {
+  background: var(--button-hover);
+  border-color: #424a5e;
+}
+button.selected {
+  background: rgba(167, 139, 250, 0.18);
+  border-color: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+
+/* =====================================================================
+   Article layout
+   ===================================================================== */
+.article {
+  max-width: 1440px;
+  margin: 0 auto;
+}
+/* Single centered text column (the intro and the sections after the story). */
+.article .column {
+  max-width: 720px;
+  margin: 0 auto;
+}
+/* Story: a narrow text column on the left and one big stage on the right
+   that stays on screen. The stage shows the widget of the section being
+   read. */
+.article .story {
+  display: grid;
+  /* The text column shrinks first, so the stage keeps most of the space. */
+  grid-template-columns: minmax(320px, min(38%, 500px)) minmax(0, 1fr);
+  gap: 32px;
+}
+.article .story > * { min-width: 0; }  /* wide formulas scroll instead of stretching */
+.article .story-stage {
+  position: sticky;
+  top: 16px;
+  align-self: start;
+  height: calc(100vh - 32px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 30px 60px -30px rgba(0, 0, 0, 0.8);
+}
+/* Each section gets most of a screen of scrolling, so short sections
+   still stay on the stage for a while. */
+.article .step {
+  min-height: 80vh;
+  padding: 8px 0 24px;
+}
+.article .step > h2:first-child { margin-top: 4px; }
+/* The last section gets a full screen, so the stage stays fully in view
+   while it is read. */
+.article .step:last-child { min-height: calc(100vh - 32px); }
+.article .story-text > hr { margin: 8px 0 40px; }
+/* Narrow windows: the stage is pinned to the top of the screen and the
+   text scrolls underneath it. */
+@media (max-width: 900px) {
+  .article .story {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 16px;
+  }
+  .article .story-stage {
+    order: -1;
+    top: 0;
+    height: 55vh;
+    z-index: 5;
+  }
+  .article .step { min-height: 60vh; }
+}
+
+.article h1, .article h2 {
+  font-weight: 700;
+  line-height: 1.25;
+  color: #f3f4f8;
+}
+.article h1 {
+  font-size: 2.1em;
+  margin: 0.6em 0 0.4em;
+}
+.article h2 {
+  font-size: 1.45em;
+  margin: 1.2em 0 0.45em;
+  letter-spacing: -0.01em;
+}
+/* Section number as a small accent badge. */
+.article h2 .num {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.7em;
+  height: 1.7em;
+  margin-right: 0.35em;
+  padding: 0 0.35em;
+  border-radius: 8px;
+  font-size: 0.72em;
+  vertical-align: 0.18em;
+  color: #fff;
+  background: linear-gradient(135deg, #a78bfa, #6d8bff);
+  box-shadow: 0 4px 14px -4px rgba(167, 139, 250, 0.6);
+}
+.article p { margin: 0 0 0.8em; }
+.article strong { color: #f3f4f8; }
+/* Section dividers: a line that fades out at both ends. */
+.article hr {
+  border: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, #343b4b 20%, #343b4b 80%, transparent);
+  margin: 40px 0;
+}
+
+/* Hero: the title and intro. */
+.article .hero {
+  padding: 40px 0 8px;
+}
+.article .hero h1 {
+  font-size: clamp(2.2em, 4.6vw, 3.2em);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  margin: 0 0 0.45em;
+  background: linear-gradient(120deg, #ffffff 0%, #d9ccff 45%, #8fb8ff 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.article .hero p { font-size: 1.08em; color: #cfd4de; }
+
+/* "Try this" / "Idea" lines: a callout with an accent bar. */
+.article p.try {
+  position: relative;
+  padding: 10px 14px 10px 16px;
+  background: linear-gradient(90deg, rgba(167, 139, 250, 0.10), rgba(167, 139, 250, 0.02));
+  border-radius: 10px;
+  border-left: 3px solid var(--accent);
+}
+.article p.try strong { color: #d9ccff; }
+/* A question to answer before trying anything. */
+.article p.question {
+  padding: 12px 16px;
+  border: 1px dashed rgba(167, 139, 250, 0.55);
+  border-radius: 10px;
+  background: rgba(167, 139, 250, 0.06);
+}
+.article ul { padding-left: 1.3em; margin: 0 0 0.8em; }
+.article li { margin-bottom: 0.4em; }
+
+/* KaTeX formulas in the light text color. */
+.article .katex { color: var(--text); }
+/* Display formulas sit on a subtle panel. */
+.article .katex-display {
+  margin: 0.2em 0 0.4em;
+  padding: 12px 10px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* The two buttons at the top. */
+.article .jump-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+.article .jump-links button {
+  padding: 8px 18px;
+  border-radius: 10px;
+  font-weight: 600;
+}
+.article .jump-links button:first-child {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #a78bfa, #6d8bff);
+  box-shadow: 0 8px 24px -10px rgba(167, 139, 250, 0.8);
+}
+.article .jump-links button:first-child:hover { filter: brightness(1.08); }
+
+/* "What happened?" blocks: closed by default, a button opens them;
+   the body is a slightly lighter panel with a colored left border. */
+.article .what-happened {
+  margin: 0 0 1em;
+}
+.article .what-happened > summary {
+  display: inline-block;
+  list-style: none;
+  font-size: 15px;
+  font-weight: 600;
+  padding: 4px 14px;
+  color: var(--text);
+  background: var(--button);
+  border: 1px solid var(--button-border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background-color 0.15s, border-color 0.15s;
+}
+.article .what-happened > summary:hover {
+  background: var(--button-hover);
+  border-color: #424a5e;
+}
+.article .what-happened[open] > summary { border-color: var(--accent); }
+.article .what-happened > summary::-webkit-details-marker { display: none; }
+/* A small chevron that turns when the block opens. */
+.article .what-happened > summary::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin: 0 9px 2px 0;
+  border-right: 2px solid var(--accent);
+  border-bottom: 2px solid var(--accent);
+  transform: rotate(-45deg);
+  transition: transform 0.2s;
+}
+.article .what-happened[open] > summary::before { transform: rotate(45deg); }
+.article .what-happened[open] > .what-happened-body {
+  animation: reveal 0.25s ease-out;
+}
+@keyframes reveal {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: none; }
+}
+.article .what-happened > .what-happened-body {
+  margin-top: 10px;
+  padding: 12px 16px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 10px 10px 0;
+}
+.article .what-happened-body p:last-child { margin-bottom: 0; }
+
+.article .playground-slot { margin-top: 20px; }
+
+/* =====================================================================
+   Explainer widget: parts shared by all sizes
+   ===================================================================== */
+/* The widget uses its own compact text size. */
+.explainer {
+  font-size: 14px;
+  line-height: 1.4;
+  color: var(--text);
+}
+.explainer button {
+  font-size: 14px;
+  padding: 3px 11px;
+}
+.explainer .control-box {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+}
+.explainer .swatch {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin: 0 5px 0 2px;
+}
+
+/* Optimizer checkboxes / names, learning rates and their sliders. */
+.explainer .ex-opt > label {
+  display: block;
+  cursor: pointer;
+  line-height: 1.7;
+}
+.explainer .lr-note {
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.explainer .lr-row {
+  display: flex;
+  align-items: center;
+  margin: 0 0 6px 22px;
+}
+.explainer .lr-row input[type="range"] {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+}
+.explainer .same-lr-label {
+  display: block;
+  cursor: pointer;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+}
+
+/* Play / Step / Reset and the step counter. */
+.explainer .ex-run-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+/* Play is the main action: accent gradient. */
+.explainer .ex-play {
+  min-width: 68px;
+  font-weight: 600;
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, #a78bfa, #6d8bff);
+  box-shadow: 0 6px 18px -8px rgba(167, 139, 250, 0.8);
+}
+.explainer .ex-play:hover {
+  background: linear-gradient(135deg, #a78bfa, #6d8bff);
+  border-color: transparent;
+  filter: brightness(1.1);
+}
+.explainer .ex-step-counter {
+  margin-top: 6px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Rotation, elongation and speed. */
+.explainer .ex-rotation {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.explainer .ex-rotation-slider {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.explainer .ex-rotation-value {
+  display: inline-block;
+  min-width: 2.4em;
+  font-variant-numeric: tabular-nums;
+}
+.explainer .ex-elongation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.explainer .ex-elongation-label { flex: 0 0 100%; }
+.explainer .ex-speed {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The plot's width and height are set in sizePlot(). */
+.explainer .ex-plot {
+  display: block;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* Arrow legend: one line per arrow, then a short note. */
+.explainer .ex-legend {
+  font-size: 13px;
+  line-height: 1.35;
+}
+.explainer .legend-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+  white-space: nowrap;
+}
+.explainer .legend-row svg { flex: 0 0 auto; }
+.explainer .legend-note {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+/* Labels: a word name followed by a KaTeX formula. */
+.explainer .ex-label-math {
+  margin-left: 0.45em;
+  color: var(--text);
+}
+.explainer .ex-label-math .katex { font-size: 1.08em; }
+.explainer .ex-label-note {
+  margin-left: 0.4em;
+  color: var(--muted);
+  font-size: 0.92em;
+}
+.explainer .ex-row-label .ex-label-name { color: var(--muted); }
+
+/* Values panel. */
+.explainer .ex-text {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+.explainer .ex-text h2 {
+  margin: 0 0 6px 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+.explainer .ex-text p { margin: 0; }
+.explainer .ex-values {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+.explainer .ex-values td {
+  padding: 2px 12px 2px 0;
+  vertical-align: top;
+}
+.explainer .ex-values td:first-child { color: var(--muted); }
+.explainer .ex-values td.ex-name-cell { color: var(--text); }
+.explainer .ex-status { margin-top: 6px; color: var(--muted); }
+
+/* =====================================================================
+   size "full": controls with the values panel under them on the left,
+   and the plot filling the rest
+   ===================================================================== */
+.explainer--full {
+  position: relative;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  /* The controls keep their full height; the values panel takes what is
+     left at the bottom and scrolls if it doesn't fit. */
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 12px 16px;
+  height: calc(100vh - 32px);
+}
+.explainer--full .ex-controls {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.explainer--full .control-box { padding: 6px 12px; }
+.explainer--full .ex-opt > label { line-height: 1.5; }
+.explainer--full .lr-row { margin-bottom: 4px; }
+.explainer--full .ex-text {
+  grid-column: 1;
+  grid-row: 2;
+  align-self: end;  /* sits at the bottom of the column */
+  max-height: 100%;
+  overflow-y: auto;
+  font-size: 12.5px;
+  padding: 10px 12px;
+}
+.explainer--full .ex-text h2 { font-size: 15px; margin-bottom: 2px; }
+.explainer--full .ex-values td { padding: 1px 10px 1px 0; }
+.explainer--full .ex-values td:not(:first-child),
+.explainer--full .ex-values td.ex-name-cell { white-space: nowrap; }
+.explainer--full .ex-plot-panel {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-height: 0;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  overflow: hidden;
+  background: var(--panel);
+}
+.explainer--full .ex-plot {
+  border: 0;
+  border-radius: 0;
+}
+/* The arrow legend floats in the plot's bottom-right corner, which the
+   paths don't reach at any rotation. */
+.explainer--full .ex-legend {
+  position: absolute;
+  z-index: 2;
+  right: 16px;
+  bottom: 16px;
+  width: 320px;
+  padding: 10px 14px 5px;
+  background: rgba(20, 23, 30, 0.78);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.7);
+}
+.explainer--full .ex-legend:empty { display: none; }
+/* Narrow windows: stack (controls, plot, values). */
+@media (max-width: 900px) {
+  .explainer--full {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto 60vh auto;
+    height: auto;
+  }
+  .explainer--full .ex-controls { grid-row: 1; overflow: visible; }
+  .explainer--full .ex-plot-panel { grid-column: 1; grid-row: 2; }
+  .explainer--full .ex-text { grid-row: 3; max-height: none; }
+}
+
+/* =====================================================================
+   size "stage": the plot fills the whole panel; controls and values
+   float over it in translucent cards on the right (the side the paths
+   don't reach at any rotation)
+   ===================================================================== */
+.explainer--stage {
+  position: absolute;
+  inset: 0;
+}
+.explainer--stage .ex-plot-panel {
+  position: absolute;
+  inset: 0;
+}
+.explainer--stage .ex-plot {
+  border: 0;
+  border-radius: 0;
+}
+.explainer--stage .ex-controls,
+.explainer--stage .ex-text {
+  position: absolute;
+  z-index: 2;  /* above the plot */
+  right: 16px;
+  width: 340px;
+  max-width: calc(100% - 32px);
+  background: rgba(20, 23, 30, 0.78);
+  -webkit-backdrop-filter: blur(10px);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 40px -16px rgba(0, 0, 0, 0.7);
+}
+/* Values card: top right. */
+.explainer--stage .ex-text {
+  top: 16px;
+  max-height: calc(50% - 24px);
+  overflow-y: auto;
+  padding: 10px 14px;
+  font-size: 13px;
+}
+.explainer--stage .ex-text h2 { font-size: 15px; margin-bottom: 2px; }
+/* Keep each number pair on one line; only the long labels wrap. */
+.explainer--stage .ex-values td:not(:first-child),
+.explainer--stage .ex-values td.ex-name-cell { white-space: nowrap; }
+.explainer--stage .ex-values td { padding-right: 10px; }
+/* Controls card (with the legend): bottom right. */
+.explainer--stage .ex-controls {
+  bottom: 16px;
+  max-height: calc(50% - 24px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+}
+.explainer--stage .control-box {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.explainer--stage .ex-run {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.explainer--stage .ex-step-counter { margin: 0; }
+.explainer--stage .ex-elongation-label { flex: 0 0 auto; }
+.explainer--stage .lr-row { margin-left: 0; }
+.explainer--stage .ex-legend:empty { display: none; }
+/* Narrow windows: smaller cards. */
+@media (max-width: 900px) {
+  .explainer--stage .ex-controls,
+  .explainer--stage .ex-text {
+    width: 230px;
+    right: 8px;
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+  .explainer--stage .ex-values td { padding: 1px 6px 1px 0; }
+  .explainer--stage .ex-text { top: 8px; }
+  .explainer--stage .ex-controls { bottom: 8px; }
+}
+
+/* =====================================================================
+   size "small": one panel with the plot, a compact row of controls
+   under it, and the values below
+   ===================================================================== */
+.explainer--small {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: linear-gradient(180deg, #1a1d25, var(--panel) 40%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  /* A soft lift off the page. */
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 24px 48px -24px rgba(0, 0, 0, 0.7),
+    0 0 0 1px rgba(167, 139, 250, 0.04);
+}
+.explainer--small .ex-plot-panel { order: 1; }
+.explainer--small .ex-controls {
+  order: 2;
+  align-self: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+.explainer--small .ex-text {
+  order: 3;
+  align-self: stretch;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  padding: 8px 2px 0;
+  font-size: 13px;
+}
+.explainer--small .ex-text h2 { font-size: 15px; margin-bottom: 2px; }
+/* Room for the "Stopped" / "Diverged" line from the start, so the
+   widget doesn't grow at the end of a run. */
+.explainer--small .ex-status { min-height: 1.4em; }
+/* Inside the small widget the controls are flat, not boxed. */
+.explainer--small .control-box {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+}
+
+/* The optimizers side by side, each with its slider under it. */
+.explainer--small .ex-optimizers {
+  flex: 1 1 100%;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.explainer--small .ex-opt {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.explainer--small .lr-row { margin: 0 0 2px 0; }
+.explainer--small .ex-same-lr { flex: 1 1 100%; }
+.explainer--small .ex-run {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.explainer--small .ex-step-counter { margin: 0; }
+.explainer--small .ex-rotation { flex: 1 1 200px; }
+.explainer--small .ex-elongation-label { flex: 0 0 auto; }
+.explainer--small .ex-legend { flex: 1 1 100%; }

@@ -3,1418 +3,401 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Optimizer explainer</title>
-<style>
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    padding: 16px;
-    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-    font-size: 15px;
-    color: #222;
-    background: #fff;
-  }
-  /* Three columns that fill the window: controls, plot, text panel. */
-  #layout {
-    display: flex;
-    gap: 16px;
-    align-items: stretch;
-    height: calc(100vh - 32px);
-  }
-  #controls-panel {
-    flex: 0 0 240px;
-    width: 240px;
-    display: flex;
-    flex-direction: column;
-    gap: 32px;
-    overflow-y: auto;  /* safety net if the controls ever outgrow the window */
-  }
-  /* Learning-rate slider under each optimizer's checkbox (log scale). */
-  .lr-row {
-    display: flex;
-    align-items: center;
-    margin: 0 0 6px 22px;
-  }
-  .lr-row input[type="range"] {
-    flex: 1 1 0;
-    min-width: 0;
-    margin: 0;
-  }
-  #same-lr-label {
-    display: block;
-    cursor: pointer;
-    margin-top: 4px;
-    padding-top: 6px;
-    border-top: 1px solid #ddd;
-    font-size: 13px;
-  }
-  #plot-panel {
-    flex: 0 0 auto;  /* width is set in sizePlot() to match the square plot */
-  }
-  /* Right column: tour panel on top, values panel below. */
-  #right-column {
-    flex: 1 1 0;
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    overflow-y: auto;
-  }
-  #tour-panel {
-    flex: 0 0 auto;
-    border: 1px solid #999;
-    padding: 12px 16px;
-  }
-  #text-panel {
-    flex: 1 0 auto;
-    border: 1px solid #999;
-    padding: 12px 16px;
-  }
-  #tour-progress {
-    color: #555;
-    font-size: 13px;
-    margin-bottom: 4px;
-  }
-  #tour-question {
-    margin: 0 0 8px 0;
-    font-weight: 600;
-  }
-  #tour-options {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    margin-bottom: 8px;
-  }
-  #tour-options button, #tour-buttons button {
-    font: inherit;
-    padding: 2px 10px;
-    cursor: pointer;
-    text-align: left;
-  }
-  #tour-options button.selected {
-    font-weight: bold;
-    background: #ddd;
-    color: #222;
-    border: 2px solid #222;
-    border-radius: 3px;
-  }
-  #tour-reveal {
-    margin: 8px 0;
-    padding: 8px 10px;
-    background: #f3f3f3;
-    border-left: 3px solid #999;
-  }
-  #tour-reveal p { margin: 0 0 8px 0; }
-  #tour-reveal p:last-child { margin-bottom: 0; }
-  #tour-reveal table {
-    border-collapse: collapse;
-    margin: 0 0 8px 0;
-    font-variant-numeric: tabular-nums;
-  }
-  #tour-reveal th, #tour-reveal td {
-    padding: 2px 14px 2px 0;
-    text-align: left;
-    font-weight: normal;
-  }
-  #tour-reveal th { color: #555; }
-  #tour-instruction {
-    margin: 8px 0;
-  }
-  #tour-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 10px;
-  }
-  #tour-nav {
-    margin-left: auto;
-    display: flex;
-    gap: 6px;
-  }
-  .lr-note {
-    margin-left: 8px;
-    color: #555;
-    font-size: 13px;
-    font-variant-numeric: tabular-nums;
-  }
-  #rotation-box {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  #rotation-slider {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-  #rotation-value {
-    display: inline-block;
-    min-width: 2.2em;
-    font-variant-numeric: tabular-nums;
-  }
-  #elongation-box {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 6px;
-  }
-  #elongation-label {
-    flex: 0 0 100%;
-  }
-  #speed-box {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-  }
-  #elongation-box button, #speed-box button {
-    font: inherit;
-    padding: 2px 10px;
-    cursor: pointer;
-  }
-  #elongation-box button.selected, #speed-box button.selected {
-    font-weight: bold;
-    background: #ddd;
-    border: 2px solid #222;
-    border-radius: 3px;
-  }
-  .control-box {
-    border: 1px solid #999;
-    padding: 6px 10px;
-    background: #fff;
-  }
-  #optimizer-box label {
-    display: block;
-    cursor: pointer;
-    line-height: 1.6;
-  }
-  .swatch {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin: 0 4px 0 2px;
-  }
-  #run-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-  }
-  #run-box button {
-    font: inherit;
-    padding: 2px 8px;
-    cursor: pointer;
-  }
-  #play-btn { min-width: 60px; }
-  #step-counter {
-    margin-top: 6px;
-    font-variant-numeric: tabular-nums;
-  }
-  /* The plot's width and height are set in sizePlot() from the window size. */
-  #plot {
-    display: block;
-    border: 1px solid #ccc;
-  }
-  /* Arrow legend, in the left column under the controls, so the plot
-     can use the full window height. */
-  #legend {
-    font-size: 13px;
-    line-height: 1.3;
-  }
-  .legend-row {
-    display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    margin-bottom: 6px;
-  }
-  .legend-row svg { flex: 0 0 auto; margin-top: 3px; }
-  #right-column h2 {
-    margin: 0 0 8px 0;
-    font-size: 18px;
-  }
-  #values {
-    margin-top: 16px;
-    border-collapse: collapse;
-    font-variant-numeric: tabular-nums;
-  }
-  #values td {
-    padding: 3px 12px 3px 0;
-    vertical-align: top;
-  }
-  #values td:first-child { color: #555; }
-  #status { margin-top: 8px; color: #555; }
-</style>
+<title>Why doesn't your optimizer go downhill?</title>
+<meta name="description" content="An interactive explainer: why gradient descent, momentum and Adam don't step straight downhill.">
+<!-- Favicon: contour rings, inline so there's no extra file. -->
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%230f1115'/%3E%3Cellipse cx='16' cy='16' rx='13' ry='6' fill='none' stroke='%23a78bfa' stroke-width='2'/%3E%3Cellipse cx='16' cy='16' rx='7' ry='3' fill='none' stroke='%235b9cff' stroke-width='2'/%3E%3Ccircle cx='16' cy='16' r='1.6' fill='%23e6e8ee'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<link rel="stylesheet" href="style.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 </head>
 <body>
 
-<div id="layout">
-  <div id="controls-panel">
-    <div id="optimizer-box" class="control-box"></div>
-    <div id="run-box" class="control-box">
-      <div id="run-buttons">
-        <button id="play-btn" type="button">Play</button>
-        <button id="step-btn" type="button">Step (+1)</button>
-        <button id="reset-btn" type="button">Reset</button>
-      </div>
-      <div id="step-counter">Step: 0</div>
-    </div>
-    <div id="speed-box" class="control-box">
-      <span>Speed:</span>
-      <button type="button" data-speed="normal">Normal</button>
-      <button type="button" data-speed="fast">Fast</button>
-    </div>
-    <label id="rotation-box" class="control-box">
-      Rotation:
-      <input id="rotation-slider" type="range" min="0" max="90" step="5" value="0">
-      <span id="rotation-value">0&deg;</span>
-    </label>
-    <div id="elongation-box" class="control-box">
-      <span id="elongation-label">Elongation:</span>
-      <button type="button" data-k="20">20:1</button>
-      <button type="button" data-k="50">50:1</button>
-      <button type="button" data-k="100">100:1</button>
-    </div>
-    <div id="legend"></div>
-  </div>
+<!--
+  $...$ is inline math and $$...$$ display math, rendered by KaTeX.
 
-  <div id="plot-panel">
-    <canvas id="plot"></canvas>
-  </div>
+  Layout: the intro and the last sections are a single centered column
+  (.column). Sections 1-7 are a .story: the text on the left, and one
+  big stage on the right that stays on screen and shows the widget of
+  the section being read. Each <section class="step"> sets up its
+  widget with data- attributes:
+    data-optimizers  checked optimizers (empty = landscape only)
+    data-elongation  20, 50 or 100
+    data-rotation    degrees
+    data-controls    controls the widget shows (see explainer.js)
+    data-speed       "normal" (default) or "fast"
+-->
+<main class="article">
 
+<div class="column hero">
 
-  <div id="right-column">
-    <div id="tour-panel">
-      <div id="tour-progress"></div>
-      <h2 id="tour-title"></h2>
-      <p id="tour-question"></p>
-      <div id="tour-options"></div>
-      <div id="tour-reveal"></div>
-      <p id="tour-instruction"></p>
-      <div id="tour-buttons">
-        <button id="tour-reveal-btn" type="button">Show explanation</button>
-        <div id="tour-nav">
-          <button id="tour-back-btn" type="button">Back</button>
-          <button id="tour-next-btn" type="button">Next</button>
-        </div>
-      </div>
-    </div>
-    <div id="text-panel">
-      <h2 id="focus-name"></h2>
-      <p id="focus-description"></p>
-      <table id="values"></table>
-      <p id="status"></p>
-    </div>
-  </div>
+<h1>Why doesn't your optimizer go downhill?</h1>
+
+<p>You've probably heard that training a neural network means "rolling downhill" on the loss. That's only half true. Gradient descent, momentum and Adam all start from the same gradient, but they each take a step in a different direction. On this page you'll see exactly how, and you'll find a case where the "best" optimizer suddenly becomes one of the worst.</p>
+
+<p>You don't need to read everything first. Every section has something to try.</p>
+
+<div class="jump-links">
+  <button type="button" data-target="section-1">Scroll down</button>
+  <button type="button" data-target="playground">Skip to the playground</button>
 </div>
 
-<script>
-"use strict";
+</div>
 
-// =====================================================================
-// Guided tour: ALL tour text lives in this array and nowhere else.
-// Every string the learner reads is marked "DRAFT: " (to be rewritten).
-//
-// Each step has:
-//   title, question, instruction, reveal   text shown in the tour panel
-//   preset        settings applied on entering the step (null = keep
-//                 the current settings): elongation (K), rotation
-//                 (degrees), optimizers (checked ids), speed
-//   revealAfter   what enables "Show explanation":
-//                 "step"          Step (+1) pressed at least once
-//                 "finish"        the run has finished
-//                 "rotate-finish" a prediction is picked, rotation is at
-//                                 targetRotation, and the run has finished
-//                 null            the step has no explanation
-// The prediction step also has: options (answer buttons), correctOption
-// (index into options), matchText / mismatchText, targetRotation.
-// =====================================================================
-const TOUR_STEPS = [
-  {
-    title: "DRAFT: Gradient descent",
-    question: "DRAFT: Why doesn't gradient descent head straight for the minimum?",
-    instruction: "DRAFT: Press Step a few times and watch the arrow.",
-    reveal: "DRAFT: The negative gradient points across the valley, not along it.",
-    preset: { elongation: 100, rotation: 0, optimizers: ["gd"], speed: "normal" },
-    revealAfter: "step"
-  },
-  {
-    title: "DRAFT: Momentum",
-    question: "DRAFT: What does the carried-over arrow change?",
-    instruction: "DRAFT: Press Step several times.",
-    reveal: "DRAFT: The step is the sum of the new gradient part and what is carried over from earlier steps.",
-    preset: { elongation: 100, rotation: 0, optimizers: ["momentum"], speed: "normal" },
-    revealAfter: "step"
-  },
-  {
-    title: "DRAFT: Adam",
-    question: "DRAFT: Adam's step doesn't point along -g either. Why?",
-    instruction: "DRAFT: Press Step once and compare the arrows.",
-    reveal: "DRAFT: Adam divides each coordinate by its own sqrt(s_hat), so both coordinates move by about the same amount. That turns the step, it doesn't only resize it.",
-    preset: { elongation: 100, rotation: 0, optimizers: ["adam"], speed: "normal" },
-    revealAfter: "step"
-  },
-  {
-    title: "DRAFT: Race",
-    question: "DRAFT: Which optimizer reaches the minimum first?",
-    instruction: "DRAFT: Press Play.",
-    reveal: "DRAFT: Adam finishes first on this bowl.",
-    preset: { elongation: 100, rotation: 0, optimizers: ["gd", "momentum", "adam"], speed: "fast" },
-    revealAfter: "finish"
-  },
-  {
-    title: "DRAFT: Rotate the bowl",
-    question: "DRAFT: Prediction: if we rotate the same bowl by 45 degrees, what changes?",
-    options: [
-      "DRAFT: Nothing changes",
-      "DRAFT: All three get slower",
-      "DRAFT: Only one optimizer changes"
-    ],
-    correctOption: 2,
-    matchText: "DRAFT: Your prediction matched what happened.",
-    mismatchText: "DRAFT: Your prediction did not match what happened.",
-    instruction: "DRAFT: Drag Rotation to 45 degrees and press Play.",
-    reveal: "DRAFT: GD and momentum use the gradient as a whole vector, so their paths just rotate with the bowl. Adam works coordinate by coordinate, so it depends on the bowl's angle relative to the x1 and x2 axes.",
-    preset: { elongation: 100, rotation: 0, optimizers: ["gd", "momentum", "adam"], speed: "fast" },
-    revealAfter: "rotate-finish",
-    targetRotation: 45
-  },
-  {
-    title: "DRAFT: Free play",
-    question: "",
-    instruction: "DRAFT: Try any settings you like.",
-    reveal: "",
-    preset: null,
-    revealAfter: null
-  }
-];
+<hr>
 
-// =====================================================================
-// Loss landscape: a bowl with elongation K, rotated by theta.
-//   u =  cos(theta)*x1 + sin(theta)*x2
-//   w = -sin(theta)*x1 + cos(theta)*x2
-//   L = u^2 + K*w^2
-// With K = 20 and theta = 0 this is x1^2 + 20*x2^2.
-// =====================================================================
-const LANDSCAPE = { K: 20, thetaDeg: 0 };
+<div class="story">
+<div class="story-text">
 
-function loss(x) {
-  const theta = LANDSCAPE.thetaDeg * Math.PI / 180;
-  const c = Math.cos(theta), s = Math.sin(theta);
-  const u = c * x[0] + s * x[1];
-  const w = -s * x[0] + c * x[1];
-  return u * u + LANDSCAPE.K * w * w;
-}
+<section class="step" id="section-1" data-optimizers="" data-elongation="20" data-rotation="0" data-controls="elongation">
 
-function gradient(x) {
-  const theta = LANDSCAPE.thetaDeg * Math.PI / 180;
-  const c = Math.cos(theta), s = Math.sin(theta);
-  const K = LANDSCAPE.K;
-  const u = c * x[0] + s * x[1];
-  const w = -s * x[0] + c * x[1];
-  return [c * 2 * u - s * 2 * K * w, s * 2 * u + c * 2 * K * w];
-}
+<h2><span class="num">1.</span> Reading the map</h2>
 
-// The start point is always the same spot relative to the bowl:
-// (-1.5, 0.5) rotated by theta.
-function startPoint() {
-  const theta = LANDSCAPE.thetaDeg * Math.PI / 180;
-  const c = Math.cos(theta), s = Math.sin(theta);
-  return [c * -1.5 - s * 0.5, s * -1.5 + c * 0.5];
-}
+<p>Imagine the loss as a landscape: high ground means a bad model, the lowest point means the best one. We only have two parameters here, $x_1$ and $x_2$, so we can draw that landscape from above, like a hiking map.</p>
 
-// Contour levels: fixed low levels near the minimum, plus levels that
-// scale with K so the steep direction is covered at every elongation.
-function contourLevels() {
-  const K = LANDSCAPE.K;
-  const levels = [0.1, 0.5, 1, 2, 4];
-  for (const f of [0.1, 0.2, 0.35, 0.5, 0.7, 0.95, 1.3, 1.7, 2.2, 2.8, 3.5]) {
-    if (f * K > 5.6) levels.push(f * K);
-  }
-  return levels;
-}
+<p>Each ring is a <strong>contour</strong>: every point on one ring has the same loss. The <strong>X</strong> in the middle is the minimum, where we want to end up. Where rings are packed close together, the ground is steep. Where they're far apart, it's almost flat.</p>
 
-const VIEW = { x1Min: -2, x1Max: 2, x2Min: -2, x2Max: 2 };
-let START = startPoint();
-const MINIMUM = [0, 0];
+<p>The landscape on this page is a long, narrow valley:</p>
 
-// =====================================================================
-// Optimizers
-// Each has: init() -> fresh state (all zeros)
-//           step(state, g) -> { step: [dx1, dx2], arrows: [...] }
-// step() updates the optimizer's own state (v, m, s, t) but not the
-// position; the caller adds `step` to the position.
-// =====================================================================
-const COLORS = { gd: "#1f77b4", momentum: "#ff7f0e", adam: "#2ca02c" };
-const ARROW_NEW_GRADIENT = "#7b3fb5";  // Momentum: new-gradient part
-const ARROW_CARRIED_OVER = "#d6408f";  // Momentum: carried-over part
-const ARROW_ADAM_GRADIENT = "#7b3fb5"; // Adam: -g
-const ARROW_ADAM_AVERAGED = "#d6408f"; // Adam: -m_hat
-const ARROW_ADAM_STEP = COLORS.adam;   // Adam: step actually taken (Adam green)
+<p>$$L(x_1, x_2) = x_1^2 + K\,x_2^2$$</p>
 
-const GD_PARAMS = { lr: 0.04 };
-function gdInit() {
-  return {};
-}
-function gdStep(state, g) {
-  const lr = GD_PARAMS.lr;
-  const step = [-lr * g[0], -lr * g[1]];
-  return {
-    step: step,
-    arrows: [{ vec: step, color: COLORS.gd, label: "step taken (-lr*g)" }]
-  };
-}
+<p>$K$ controls how stretched the valley is. With $K = 100$, moving in $x_2$ changes the loss 100 times more than moving in $x_1$.</p>
 
-const MOMENTUM_PARAMS = { lr: 0.01, beta: 0.9 };
-function momentumInit() {
-  return { v: [0, 0] };
-}
-function momentumStep(state, g) {
-  const lr = MOMENTUM_PARAMS.lr, beta = MOMENTUM_PARAMS.beta;
-  const vPrev = state.v;
-  const gradientPart = [-lr * g[0], -lr * g[1]];
-  const carriedPart = [-lr * beta * vPrev[0], -lr * beta * vPrev[1]];
-  state.v = [beta * vPrev[0] + g[0], beta * vPrev[1] + g[1]];
-  const step = [-lr * state.v[0], -lr * state.v[1]];
-  return {
-    step: step,
-    arrows: [
-      { vec: gradientPart, color: ARROW_NEW_GRADIENT, label: "new-gradient part (-lr*g)" },
-      { vec: carriedPart, color: ARROW_CARRIED_OVER, label: "carried-over part (-lr*beta*v_previous)" },
-      { vec: step, color: COLORS.momentum, label: "step taken (their sum)" }
-    ]
-  };
-}
+<p class="try"><strong>Try this:</strong> switch from 20:1 to 100:1. Which direction gets steeper?</p>
 
-const ADAM_PARAMS = { lr: 0.1, b1: 0.9, b2: 0.999, eps: 1e-8 };
-function adamInit() {
-  return { m: [0, 0], s: [0, 0], t: 0 };
-}
-function adamStep(state, g) {
-  const p = ADAM_PARAMS;
-  state.t += 1;
-  const step = [0, 0], mHat = [0, 0], sqrtSHat = [0, 0], effectiveLr = [0, 0];
-  for (let i = 0; i < 2; i++) {
-    state.m[i] = p.b1 * state.m[i] + (1 - p.b1) * g[i];
-    state.s[i] = p.b2 * state.s[i] + (1 - p.b2) * g[i] * g[i];
-    mHat[i] = state.m[i] / (1 - Math.pow(p.b1, state.t));
-    sqrtSHat[i] = Math.sqrt(state.s[i] / (1 - Math.pow(p.b2, state.t)));
-    effectiveLr[i] = p.lr / sqrtSHat[i];
-    step[i] = -p.lr * mHat[i] / (sqrtSHat[i] + p.eps);
-  }
-  // The three arrows have very different true lengths, so each is drawn
-  // at the same fixed length (direction only). -g is normally the same
-  // width as -m_hat; when the two point (almost) the same way, as on
-  // step 1, -g is drawn thicker so it stays visible underneath.
-  const gLen = Math.hypot(g[0], g[1]), mLen = Math.hypot(mHat[0], mHat[1]);
-  const cosAngle = gLen > 0 && mLen > 0 ? (g[0] * mHat[0] + g[1] * mHat[1]) / (gLen * mLen) : 0;
-  const overlap = cosAngle > Math.cos(3 * Math.PI / 180);  // within 3 degrees
-  return {
-    step: step,
-    arrows: [
-      { vec: [-g[0], -g[1]], color: ARROW_ADAM_GRADIENT, fixedLength: true,
-        width: overlap ? 6.5 : 4, head: overlap ? 19 : 14,
-        label: "-g: where gradient descent would go" },
-      { vec: [-mHat[0], -mHat[1]], color: ARROW_ADAM_AVERAGED, fixedLength: true, width: 4, head: 14,
-        label: "-m_hat: after averaging with past gradients" },
-      { vec: step, color: ARROW_ADAM_STEP, fixedLength: true, width: 3.5, head: 12,
-        label: "step taken: after dividing each coordinate by sqrt(s_hat)" }
-    ],
-    details: [g, mHat, sqrtSHat, effectiveLr, step]  // same order as detailLabels
-  };
-}
-const ADAM_DETAIL_LABELS = [
-  "gradient g",
-  "m_hat",
-  "sqrt(s_hat)",
-  "effective learning rate per coordinate: lr / sqrt(s_hat)",
-  "step taken"
-];
-const ADAM_LEGEND_NOTE = "All three arrows are drawn at the same length (direction only).";
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>The rings squeeze together in the up-down ($x_2$) direction. Up-down is now a steep wall; left-right is a gentle slope. Real loss landscapes are full of valleys like this, and they're exactly where optimizers struggle.</p>
+  </div>
+</details>
 
-// Default learning rates depend on the elongation K (Adam's stays at 0.1).
-// The learner can change them with the sliders; changing the elongation
-// or entering a tour step sets them back to these defaults.
-function setLearningRates(K) {
-  GD_PARAMS.lr = 0.8 / K;        // 0.04 at 20:1
-  MOMENTUM_PARAMS.lr = 0.2 / K;  // 0.01 at 20:1
-  ADAM_PARAMS.lr = 0.1;
-}
+</section>
 
-const OPTIMIZERS = {
-  gd: {
-    name: "GD",
-    color: COLORS.gd,
-    init: gdInit,
-    step: gdStep,
-    lr: function () { return GD_PARAMS.lr; },
-    setLr: function (lr) { GD_PARAMS.lr = lr; },
-    showLegend: false,
-    description: "Placeholder: gradient descent (GD) description goes here."
-  },
-  momentum: {
-    name: "Momentum",
-    color: COLORS.momentum,
-    init: momentumInit,
-    step: momentumStep,
-    lr: function () { return MOMENTUM_PARAMS.lr; },
-    setLr: function (lr) { MOMENTUM_PARAMS.lr = lr; },
-    showLegend: true,
-    description: "Placeholder: Momentum description goes here."
-  },
-  adam: {
-    name: "Adam",
-    color: COLORS.adam,
-    init: adamInit,
-    step: adamStep,
-    lr: function () { return ADAM_PARAMS.lr; },
-    setLr: function (lr) { ADAM_PARAMS.lr = lr; },
-    showLegend: true,
-    legendNote: ADAM_LEGEND_NOTE,
-    detailLabels: ADAM_DETAIL_LABELS,
-    description: "Placeholder: Adam description goes here."
-  }
-};
-const OPTIMIZER_IDS = ["gd", "momentum", "adam"];
+<hr>
 
-// =====================================================================
-// Simulation state
-// =====================================================================
-const SPEEDS = { normal: 150, fast: 30 };  // ms per step while playing
-let playSpeed = "normal";
-const MAX_PLAY_STEPS = 300;
-const STOP_LOSS = 0.001;
+<section class="step" data-optimizers="gd" data-elongation="100" data-rotation="0" data-controls="playStep,learningRates">
 
-const runs = {};          // id -> { x, state, path, stopped, last }
-let checkOrder = ["gd"];  // checked ids, oldest first (last one = most recently checked)
-let stepCount = 0;
-let playTimer = null;
-// Arrows for the latest step, one entry per optimizer that is still
-// moving: { id, origin, arrows }. Each new step replaces them.
-let arrowSets = [];
+<h2><span class="num">2.</span> Gradient descent: steepest is not shortest</h2>
 
-function isChecked(id) {
-  return checkOrder.indexOf(id) !== -1;
-}
+<p>Gradient descent does one simple thing: at the current point, find the steepest way down and take a step that way.</p>
 
-function checkedIds() {
-  return OPTIMIZER_IDS.filter(isChecked);
-}
+<p>$$x \leftarrow x - \eta \cdot \nabla L$$</p>
 
-function focusId() {
-  return checkOrder.length ? checkOrder[checkOrder.length - 1] : null;
-}
+<p>The gradient $\nabla L$ points uphill, so we step the opposite way. The learning rate $\eta$ sets how big the step is.</p>
 
-function resetAll() {
-  pause();
-  for (const id of OPTIMIZER_IDS) {
-    runs[id] = {
-      x: START.slice(),
-      state: OPTIMIZERS[id].init(),
-      path: [START.slice()],
-      stopped: false,
-      diverged: false,
-      last: null
-    };
-  }
-  stepCount = 0;
-  arrowSets = [];  // no arrows until the first step
-  render();
-}
+<p>Here's the catch: "steepest downhill" is a local answer. In a narrow valley, the steepest direction points <strong>across</strong> the valley, straight at the nearest wall, not along the valley toward the minimum.</p>
 
-function allStopped() {
-  const ids = checkedIds();
-  return ids.every(function (id) { return runs[id].stopped; });
-}
+<p class="try"><strong>Try this:</strong> press Step a few times and watch the arrow. Then press Play.</p>
 
-// Advance every checked optimizer that is still moving by one step.
-// Returns false if nothing could move. Replaces the arrows with ones for
-// this step, drawn at each optimizer's new (current) point.
-function advance() {
-  const ids = checkedIds();
-  if (ids.length === 0 || allStopped()) return false;
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>The first steps point almost straight down, across the valley, and the path bounces from side to side. Then it creeps slowly to the right toward the minimum. It takes about 240 steps.</p>
+  </div>
+</details>
 
-  arrowSets = [];
-  for (const id of ids) {
-    const run = runs[id];
-    if (run.stopped) continue;
-    const g = gradient(run.x);
-    const result = OPTIMIZERS[id].step(run.state, g);
-    run.x = [run.x[0] + result.step[0], run.x[1] + result.step[1]];
-    // Only finite points go into the drawn path (a NaN point can't be drawn).
-    if (isFinite(run.x[0]) && isFinite(run.x[1])) run.path.push(run.x.slice());
-    run.last = { gradient: g, step: result.step, details: result.details };
-    const L = loss(run.x);
-    if (isDiverged(L)) {
-      run.diverged = true;  // stop it; the others keep going
-      run.stopped = true;
-    } else if (L < STOP_LOSS) {
-      run.stopped = true;
-    }
-    // Stopped or diverged optimizers get no arrows.
-    if (!run.stopped) {
-      // One optimizer checked: its full set of arrows. Two or three: only
-      // the step taken (the last arrow), in the optimizer's path color.
-      const arrows = ids.length === 1
-        ? result.arrows
-        : [Object.assign({}, result.arrows[result.arrows.length - 1], { color: OPTIMIZERS[id].color })];
-      arrowSets.push({ id: id, origin: run.x.slice(), arrows: arrows });
-    }
-  }
-  stepCount += 1;
-  return true;
-}
+<p class="try"><strong>Try this:</strong> raise the learning rate a little at a time. Watch the zig-zag grow. Then try 0.012.</p>
 
-function play() {
-  if (playTimer !== null) return;
-  if (checkedIds().length === 0 || allStopped() || stepCount >= MAX_PLAY_STEPS) return;
-  playTimer = setInterval(playTick, SPEEDS[playSpeed]);
-  render();
-}
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Above 0.01, gradient descent blows up: each bounce overshoots further than the last. The steep direction sets a speed limit. Go faster than it allows and you fly out of the valley. But staying under that limit means tiny steps in the flat direction, which is why gradient descent crawls.</p>
+  </div>
+</details>
 
-function playTick() {
-  advance();
-  if (allStopped() || stepCount >= MAX_PLAY_STEPS) pause();
-  render();
-}
+</section>
 
-// Switch between Normal and Fast; takes effect immediately if playing.
-function setSpeed(name) {
-  playSpeed = name;
-  for (const button of document.querySelectorAll("#speed-box button")) {
-    button.classList.toggle("selected", button.dataset.speed === playSpeed);
-  }
-  if (playTimer !== null) {
-    clearInterval(playTimer);
-    playTimer = setInterval(playTick, SPEEDS[playSpeed]);
-  }
-}
+<hr>
 
-// A run has finished when every checked optimizer has stopped, or the
-// step limit has been reached.
-function runFinished() {
-  return checkedIds().length > 0 && stepCount > 0 &&
-    (allStopped() || stepCount >= MAX_PLAY_STEPS);
-}
+<section class="step" data-optimizers="momentum" data-elongation="100" data-rotation="0" data-controls="playStep,learningRates">
 
-// An optimizer has diverged if its loss goes above 1e6 or becomes NaN.
-const DIVERGE_LOSS = 1e6;
-function isDiverged(L) {
-  return isNaN(L) || L > DIVERGE_LOSS;
-}
+<h2><span class="num">3.</span> Momentum: remembering where you were going</h2>
 
-// Run one optimizer in the background (nothing is drawn) on the current
-// bowl rotated to thetaDeg. Returns the number of steps it needs to get
-// below the stop loss, null if it does not get there within the limit,
-// or "diverged" if it diverges.
-function stepsToFinish(id, thetaDeg) {
-  const savedTheta = LANDSCAPE.thetaDeg;
-  LANDSCAPE.thetaDeg = thetaDeg;
-  try {
-    let x = startPoint();
-    const state = OPTIMIZERS[id].init();
-    let n = 0;
-    while (loss(x) >= STOP_LOSS && n < MAX_PLAY_STEPS) {
-      const result = OPTIMIZERS[id].step(state, gradient(x));
-      x = [x[0] + result.step[0], x[1] + result.step[1]];
-      n += 1;
-      if (isDiverged(loss(x))) return "diverged";
-    }
-    return loss(x) < STOP_LOSS ? n : null;
-  } finally {
-    LANDSCAPE.thetaDeg = savedTheta;
-  }
-}
+<p>Momentum adds memory. Instead of only using today's gradient, it keeps a running <strong>velocity</strong> and adds the new gradient to it:</p>
 
-function pause() {
-  if (playTimer !== null) {
-    clearInterval(playTimer);
-    playTimer = null;
-  }
-}
+<p>$$v \leftarrow \beta\, v + \nabla L \qquad x \leftarrow x - \eta \cdot v \qquad (\beta = 0.9)$$</p>
 
-function stepOnce() {
-  pause();
-  advance();
-  tour.stepPressed = true;
-  render();
-}
+<p>Each step is now two pieces: a push from the <strong>new gradient</strong> and a <strong>carried-over</strong> part from earlier steps. Pushes that keep pointing the same way build up speed. Pushes that flip back and forth partly cancel out.</p>
 
-// =====================================================================
-// Drawing
-// =====================================================================
-const CANVAS_W = 640;  // logical drawing size; square, same pixels-per-unit on both axes
-const CANVAS_H = 640;
-const PIXEL_SCALE = 2;  // backing-store scale for sharp lines
-const ARROW_TARGET_PX = 90;  // longest arrow of a step is drawn at least this long
+<p class="try"><strong>Try this:</strong> press Step several times and compare the two part-arrows with the step actually taken.</p>
 
-const canvas = document.getElementById("plot");
-canvas.width = CANVAS_W * PIXEL_SCALE;
-canvas.height = CANVAS_H * PIXEL_SCALE;
-const ctx = canvas.getContext("2d");
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Along the valley, the gradient keeps pointing the same way, so the carried-over arrow grows and the optimizer speeds up. Across the valley, the gradient flips sides, so the two parts partly cancel. Momentum reaches the minimum in about 64 steps, nearly four times faster than gradient descent.</p>
+  </div>
+</details>
 
-function toPx(x) {
-  return [
-    (x[0] - VIEW.x1Min) / (VIEW.x1Max - VIEW.x1Min) * CANVAS_W,
-    (VIEW.x2Max - x[1]) / (VIEW.x2Max - VIEW.x2Min) * CANVAS_H
-  ];
-}
+<p class="try"><strong>Try this:</strong> raise the learning rate to about 0.015 and press Play.</p>
 
-// Contours are traced from loss() itself (marching squares), so a new
-// landscape only needs new loss/gradient functions and contour levels.
-function drawContours(c) {
-  const nx = 320, ny = 320;
-  const dx = (VIEW.x1Max - VIEW.x1Min) / nx;
-  const dy = (VIEW.x2Max - VIEW.x2Min) / ny;
-  const vals = [];
-  for (let j = 0; j <= ny; j++) {
-    const row = [];
-    for (let i = 0; i <= nx; i++) {
-      row.push(loss([VIEW.x1Min + i * dx, VIEW.x2Min + j * dy]));
-    }
-    vals.push(row);
-  }
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>It swings wildly from wall to wall before settling. The carried-over arrow is now so strong that it overpowers the new gradient: the optimizer keeps going in the old direction even after the slope says turn around. Momentum doesn't remove oscillation. It changes it into big, slow swings. Push the learning rate higher and it diverges too.</p>
+  </div>
+</details>
 
-  function crossing(pa, va, pb, vb, level) {
-    const t = (level - va) / (vb - va);
-    return toPx([pa[0] + t * (pb[0] - pa[0]), pa[1] + t * (pb[1] - pa[1])]);
-  }
+</section>
 
-  c.strokeStyle = "#b8b8b8";
-  c.lineWidth = 1;
-  for (const level of contourLevels()) {
-    c.beginPath();
-    for (let j = 0; j < ny; j++) {
-      for (let i = 0; i < nx; i++) {
-        const x0 = VIEW.x1Min + i * dx, x1 = x0 + dx;
-        const y0 = VIEW.x2Min + j * dy, y1 = y0 + dy;
-        const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1]];
-        const v = [vals[j][i], vals[j][i + 1], vals[j + 1][i + 1], vals[j + 1][i]];
-        const pts = [];
-        for (let k = 0; k < 4; k++) {
-          const k2 = (k + 1) % 4;
-          if ((v[k] < level) !== (v[k2] < level)) {
-            pts.push(crossing(corners[k], v[k], corners[k2], v[k2], level));
-          }
-        }
-        for (let k = 0; k + 1 < pts.length; k += 2) {
-          c.moveTo(pts[k][0], pts[k][1]);
-          c.lineTo(pts[k + 1][0], pts[k + 1][1]);
-        }
+<hr>
+
+<section class="step" data-optimizers="adam" data-elongation="100" data-rotation="0" data-controls="playStep">
+
+<h2><span class="num">4.</span> Adam: every coordinate gets its own step size</h2>
+
+<p>Adam keeps two running averages for each parameter: one of the gradients ($m$), and one of the <strong>squared</strong> gradients ($s$):</p>
+
+<p>$$m \leftarrow \beta_1 m + (1 - \beta_1)\, g \qquad s \leftarrow \beta_2 s + (1 - \beta_2)\, g^2$$</p>
+
+<p>$$x \leftarrow x - \eta \cdot \frac{\hat m}{\sqrt{\hat s} + \epsilon}$$</p>
+
+<p>(The hats mean a small correction for the first few steps, because $m$ and $s$ start at zero.)</p>
+
+<p>The key part is the division. Each coordinate is divided by <strong>its own</strong> $\sqrt{\hat s}$, the typical size of its own gradient. A coordinate with huge gradients gets divided by a big number. A coordinate with tiny gradients gets divided by a small one. So both end up taking steps of roughly the same size.</p>
+
+<p>That doesn't just make the step bigger or smaller. It <strong>turns</strong> it.</p>
+
+<p>A quick example: suppose the gradient is $(100, 1)$. Gradient descent steps along $-(100, 1)$, almost entirely in the steep direction. On Adam's first step, $\hat m = g$ and $\sqrt{\hat s} = |g|$ for each coordinate, so the step is $-\eta \cdot (1, 1)$: a 45° diagonal, no matter how different the two gradients were.</p>
+
+<p class="try"><strong>Try this:</strong> press Step once. Compare the three arrows.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>The gradient arrow ($-g$) points almost straight down. Adam's actual step points at 45°, moving just as much along the valley as across it. Keep stepping: as Adam's averages build up, its steps bend to follow the valley floor toward the minimum.</p>
+  </div>
+</details>
+
+</section>
+
+<hr>
+
+<section class="step" data-optimizers="gd,momentum,adam" data-elongation="100" data-rotation="0" data-controls="play,reset" data-speed="fast">
+
+<h2><span class="num">5.</span> The race</h2>
+
+<p>Let's put all three in the same valley.</p>
+
+<p class="try"><strong>Try this:</strong> press Play.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Adam reaches the minimum first, in about 43 steps. Momentum takes about 64, and gradient descent about 240. Adam looks like the clear winner. Remember this result.</p>
+  </div>
+</details>
+
+</section>
+
+<hr>
+
+<section class="step" data-optimizers="gd,momentum,adam" data-elongation="100" data-rotation="0" data-controls="play,reset,rotation" data-speed="fast">
+
+<h2><span class="num">6.</span> The surprise: turn the valley</h2>
+
+<p>Here's a question to answer <strong>before</strong> you touch anything.</p>
+
+<p>We'll take this exact valley, the same shape, the same steepness, the same starting point relative to the valley, and rotate it by 45°. Nothing about the problem gets harder. It's just turned.</p>
+
+<p class="question"><strong>What do you predict happens to the three optimizers?</strong></p>
+
+<p class="try"><strong>Try this:</strong> drag Rotation to 45° and press Play.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Gradient descent and momentum take exactly the same number of steps as before, 240 and 64. Their paths are the same paths, just rotated. Adam, the winner a moment ago, now needs about 208 steps and finishes far behind momentum.</p>
+    <p><strong>Why?</strong> Gradient descent and momentum use the gradient as one whole arrow. Rotate the valley and the arrows rotate with it, so nothing really changes.</p>
+    <p>Adam works <strong>coordinate by coordinate</strong>, along the $x_1$ and $x_2$ axes. When the valley lines up with an axis, all the steepness sits in one coordinate and all the flatness in the other, so Adam can give each its own step size. Turned 45°, the steep direction is a mix of $x_1$ and $x_2$, and both coordinates see gradients of about the same size. Adam divides both by about the same number, its advantage disappears, and its steps point across the valley instead of along it.</p>
+    <p>Check it yourself: switch to the Adam-only view in the playground and look at the effective learning rate per coordinate. At 0° the two numbers are very different. At 45° they're almost equal.</p>
+  </div>
+</details>
+
+<p class="try"><strong>Try this:</strong> try 15° and 30°, then go all the way to 90°.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Adam gets steadily slower as the angle grows: about 108 steps at 15°, about 181 at 30°. At 90° it's back to 43, because the valley lines up with an axis again, just the other one.</p>
+  </div>
+</details>
+
+</section>
+
+<hr>
+
+<section class="step" data-optimizers="gd,momentum,adam" data-elongation="100" data-rotation="0" data-controls="learningRates,sameLearningRate,play,reset" data-speed="fast">
+
+<h2><span class="num">7.</span> How sensitive is each one to the learning rate?</h2>
+
+<p>Tick <strong>Same learning rate for all</strong> and set it to 0.02 on the 100:1 valley. Press Play.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Gradient descent and momentum both blow up. Adam is fine. Because Adam divides each coordinate by the size of its own gradient, its steps are roughly $\eta$ in size no matter how steep the ground is. That makes it much harder to pick a learning rate that breaks it. It also means "the same learning rate" isn't a fair comparison: the same number means something completely different for each optimizer.</p>
+  </div>
+</details>
+
+</section>
+
+</div>
+<div class="story-stage" id="stage"></div>
+</div>
+
+<hr>
+
+<section class="column">
+
+<h2><span class="num">8.</span> What this picture doesn't show</h2>
+
+<p>This page is built to give you intuition, not to rank optimizers.</p>
+
+<ul>
+  <li>Real networks have millions of parameters, not two. Their valleys aren't neat bowls lined up with an axis or rotated by an exact angle.</li>
+  <li>Adam isn't always the best, and it isn't always the worst. Which optimizer works better depends on the problem, and on tuning the learning rate for each one.</li>
+  <li>Our landscape has a single minimum. Real ones have many, and which one an optimizer lands in matters too. A landscape with two minima would be a good next step for this explainer.</li>
+</ul>
+
+</section>
+
+<hr>
+
+<section id="playground">
+
+<div class="column">
+
+<h2><span class="num">9.</span> Playground</h2>
+
+<p>Everything is unlocked here. Change anything you like. If you want ideas, start with these:</p>
+
+<p class="try"><strong>Idea 1:</strong> set the valley to 20:1 and rotate it to 45°.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Adam barely slows down this time (about 43 steps to about 54). Rotation only hurts Adam a lot when the valley is very narrow. In a round bowl, the angle wouldn't matter at all.</p>
+  </div>
+</details>
+
+<p class="try"><strong>Idea 2:</strong> gradient descent alone on 100:1. Try a learning rate of 0.004, then 0.0095.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>At 0.004 the path is smooth, with no zig-zag, but so slow it may not finish in 300 steps. At 0.0095 it zig-zags hard but finishes faster. For gradient descent, the fastest learning rate sits right next to the one that blows up.</p>
+  </div>
+</details>
+
+<p class="try"><strong>Idea 3:</strong> Adam alone at 45°. Press Step a few times and read the effective learning rate per coordinate in the right panel.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>The two numbers are nearly equal. That's the whole story of section 6 in two numbers: Adam can only treat directions differently when they line up with different coordinates.</p>
+  </div>
+</details>
+
+<p class="try"><strong>Idea 4:</strong> all three, rotation 45°, then switch the valley from 20:1 to 50:1 to 100:1.</p>
+
+<details class="what-happened">
+  <summary>What happened?</summary>
+  <div class="what-happened-body">
+    <p>Gradient descent gets much slower as the valley narrows (about 47, then 119, then 240 steps), because its speed limit is set by the steepest direction. Adam slows down almost as badly (about 54, 118, 208). Momentum barely changes (about 59 to 64). In a narrow, turned valley, momentum is the one that holds up best.</p>
+  </div>
+</details>
+
+</div>
+
+<!-- The full explainer, with every control. -->
+<div class="playground-slot" id="playground-widget"></div>
+
+</section>
+
+</main>
+
+<script type="module">
+  import { createExplainer } from "./explainer.js";
+
+  // The stage: one widget per section, stacked in the same panel. Only
+  // the widget of the section being read is shown (each keeps its own run
+  // while hidden, so it is still there when the reader scrolls back).
+  const stage = document.getElementById("stage");
+  const steps = [...document.querySelectorAll(".story .step")];
+  const list = function (s) { return s ? s.split(",") : []; };
+  const stageWidgets = steps.map(function (step) {
+    const widget = createExplainer(stage, {
+      size: "stage",
+      controls: list(step.dataset.controls),
+      preset: {
+        elongation: Number(step.dataset.elongation),
+        rotation: Number(step.dataset.rotation),
+        optimizers: list(step.dataset.optimizers),
+        speed: step.dataset.speed || "normal"
+        // learning rates: the defaults for the elongation
       }
-    }
-    c.stroke();
-  }
-}
-
-// Light dashed x1 and x2 axis lines through (0, 0), with labels.
-function drawAxes(c) {
-  const o = toPx([0, 0]);
-  c.strokeStyle = "#c4c4c4";
-  c.lineWidth = 1.5;
-  c.setLineDash([6, 4]);
-  c.beginPath();
-  c.moveTo(0, o[1]); c.lineTo(CANVAS_W, o[1]);
-  c.moveTo(o[0], 0); c.lineTo(o[0], CANVAS_H);
-  c.stroke();
-  c.setLineDash([]);
-  c.fillStyle = "#777";
-  c.font = "italic 14px system-ui, sans-serif";
-  c.fillText("x1", CANVAS_W - 22, o[1] - 7);
-  c.fillText("x2", o[0] + 7, 16);
-}
-
-// The axes and contours only change when the landscape changes, so they
-// are drawn once per landscape into this image and reused every frame.
-const background = document.createElement("canvas");
-background.width = canvas.width;
-background.height = canvas.height;
-function redrawBackground() {
-  const c = background.getContext("2d");
-  c.setTransform(PIXEL_SCALE, 0, 0, PIXEL_SCALE, 0, 0);
-  c.fillStyle = "#fff";
-  c.fillRect(0, 0, CANVAS_W, CANVAS_H);
-  drawAxes(c);
-  drawContours(c);
-}
-
-// Minimum: a cross and label. Drawn on top of the paths, with a white
-// outline, so it stays visible at the end of a run.
-function drawMinimumMarker() {
-  const m = toPx(MINIMUM);
-  const label = "minimum (0, 0)";
-  ctx.font = "13px system-ui, sans-serif";
-  ctx.lineJoin = "round";
-  ctx.lineCap = "round";
-  for (const pass of [{ color: "#fff", width: 5 }, { color: "#222", width: 2 }]) {
-    ctx.strokeStyle = pass.color;
-    ctx.lineWidth = pass.width;
-    ctx.beginPath();
-    ctx.moveTo(m[0] - 6, m[1] - 6); ctx.lineTo(m[0] + 6, m[1] + 6);
-    ctx.moveTo(m[0] - 6, m[1] + 6); ctx.lineTo(m[0] + 6, m[1] - 6);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 3;
-  ctx.strokeText(label, m[0] + 10, m[1] + 18);
-  ctx.fillStyle = "#222";
-  ctx.fillText(label, m[0] + 10, m[1] + 18);
-  ctx.lineJoin = "miter";
-  ctx.lineCap = "butt";
-}
-
-// Start: a ring and label.
-function drawStartMarker() {
-  ctx.font = "13px system-ui, sans-serif";
-  ctx.fillStyle = "#222";
-  ctx.strokeStyle = "#222";
-  ctx.lineWidth = 2;
-  const s = toPx(START);
-  ctx.beginPath();
-  ctx.arc(s[0], s[1], 7, 0, 2 * Math.PI);
-  ctx.stroke();
-  const startLabel = "start (" + Number(START[0].toFixed(2)) + ", " + Number(START[1].toFixed(2)) + ")";
-  ctx.fillText(startLabel, s[0] - 30, s[1] - 14);
-}
-
-function drawPath(id) {
-  const path = runs[id].path;
-  ctx.strokeStyle = OPTIMIZERS[id].color;
-  ctx.fillStyle = OPTIMIZERS[id].color;
-  ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  for (let i = 0; i < path.length; i++) {
-    const p = toPx(path[i]);
-    if (i === 0) ctx.moveTo(p[0], p[1]); else ctx.lineTo(p[0], p[1]);
-  }
-  ctx.stroke();
-  for (let i = 0; i < path.length; i++) {
-    const p = toPx(path[i]);
-    ctx.beginPath();
-    ctx.arc(p[0], p[1], 3, 0, 2 * Math.PI);
-    ctx.fill();
-  }
-}
-
-function drawArrow(from, to, color, width, headSize) {
-  const dx = to[0] - from[0], dy = to[1] - from[1];
-  const len = Math.hypot(dx, dy);
-  if (len < 0.5) return;  // nothing to show (e.g. carried-over part on step 1)
-  const ux = dx / len, uy = dy / len;
-  const head = Math.min(headSize || 12, len * 0.6);
-  const baseX = to[0] - ux * head, baseY = to[1] - uy * head;
-  ctx.strokeStyle = color;
-  ctx.fillStyle = color;
-  ctx.lineWidth = width;
-  ctx.beginPath();
-  ctx.moveTo(from[0], from[1]);
-  ctx.lineTo(baseX, baseY);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(to[0], to[1]);
-  ctx.lineTo(baseX - uy * head * 0.45, baseY + ux * head * 0.45);
-  ctx.lineTo(baseX + uy * head * 0.45, baseY - ux * head * 0.45);
-  ctx.closePath();
-  ctx.fill();
-}
-
-function drawArrows() {
-  for (const set of arrowSets) drawArrowSet(set);
-}
-
-// Draw one optimizer's arrows, starting at its current point.
-function drawArrowSet(set) {
-  const pxPerUnit = CANVAS_W / (VIEW.x1Max - VIEW.x1Min);
-  const origin = toPx(set.origin);
-
-  // One common scale factor for all arrows of this step.
-  let longest = 0;
-  for (const a of set.arrows) {
-    longest = Math.max(longest, Math.hypot(a.vec[0], a.vec[1]) * pxPerUnit);
-  }
-  if (!(longest > 0)) return;
-  const factor = Math.max(1, ARROW_TARGET_PX / longest);
-
-  set.arrows.forEach(function (a, i) {
-    const isLast = i === set.arrows.length - 1;  // the step actually taken
-    // Fixed-length arrows show direction only; the others share `factor`.
-    const lengthPx = Math.hypot(a.vec[0], a.vec[1]) * pxPerUnit;
-    if (lengthPx === 0) return;
-    const scale = a.fixedLength ? ARROW_TARGET_PX / lengthPx : factor;
-    const tip = [
-      origin[0] + a.vec[0] * pxPerUnit * scale,
-      origin[1] - a.vec[1] * pxPerUnit * scale
-    ];
-    drawArrow(origin, tip, a.color, a.width || (isLast ? 3.5 : 2.5), a.head);
+    });
+    widget.setVisible(false);
+    return widget;
   });
-}
-
-// The arrow legend is shown in the left column under the controls (not
-// drawn on the plot), for the optimizers that have one (Momentum and Adam).
-function renderLegend() {
-  const legendEl = document.getElementById("legend");
-  legendEl.innerHTML = "";
-  // Only when exactly one optimizer is checked (and it has arrows showing).
-  if (checkedIds().length !== 1 || arrowSets.length !== 1) return;
-  const set = arrowSets[0];
-  const opt = OPTIMIZERS[set.id];
-  if (!opt.showLegend) return;
-
-  for (const a of set.arrows) {
-    const row = document.createElement("div");
-    row.className = "legend-row";
-    row.innerHTML =
-      '<svg width="30" height="12" viewBox="0 0 30 12">' +
-      '<line x1="0" y1="6" x2="20" y2="6" stroke-width="2.5"></line>' +
-      '<polygon points="30,6 19,1.5 19,10.5"></polygon></svg>';
-    row.querySelector("line").setAttribute("stroke", a.color);
-    row.querySelector("polygon").setAttribute("fill", a.color);
-    const text = document.createElement("span");
-    text.textContent = a.label;
-    row.appendChild(text);
-    legendEl.appendChild(row);
+  let active = -1;
+  function activate(i) {
+    if (i === active) return;
+    if (active >= 0) stageWidgets[active].setVisible(false);
+    active = i;
+    stageWidgets[i].setVisible(true);
   }
-  if (opt.legendNote) {
-    const noteRow = document.createElement("div");
-    noteRow.className = "legend-row";
-    noteRow.textContent = opt.legendNote;
-    legendEl.appendChild(noteRow);
-  }
-}
-
-// Size the square plot as large as the window allows: the full window
-// height inside the page padding, but never so wide that the right
-// column gets too narrow. Runs again when the window resizes.
-const PAGE_PADDING = 16, COLUMN_GAP = 16, CONTROLS_W = 240;
-const TEXT_PANEL_MIN_W = 280, PLOT_MIN_SIZE = 240;
-function sizePlot() {
-  const panel = document.getElementById("plot-panel");
-  const availableW = window.innerWidth - 2 * PAGE_PADDING - CONTROLS_W - 2 * COLUMN_GAP - TEXT_PANEL_MIN_W;
-  const availableH = window.innerHeight - 2 * PAGE_PADDING;
-  const size = Math.max(PLOT_MIN_SIZE, Math.floor(Math.min(availableH, availableW)));
-  panel.style.width = size + "px";
-  canvas.style.width = size + "px";
-  canvas.style.height = size + "px";
-}
-window.addEventListener("resize", sizePlot);
-
-function drawPlot() {
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.drawImage(background, 0, 0);
-  ctx.setTransform(PIXEL_SCALE, 0, 0, PIXEL_SCALE, 0, 0);
-  drawStartMarker();
-  for (const id of checkedIds()) drawPath(id);
-  drawMinimumMarker();  // on top of the paths
-  drawArrows();
-}
-
-// =====================================================================
-// Text panel and controls
-// =====================================================================
-function fmt(n) {
-  return n.toFixed(4);
-}
-function fmtVec(v) {
-  return "(" + fmt(v[0]) + ", " + fmt(v[1]) + ")";
-}
-
-function renderText() {
-  const nameEl = document.getElementById("focus-name");
-  const descEl = document.getElementById("focus-description");
-  const valuesEl = document.getElementById("values");
-  const statusEl = document.getElementById("status");
-  const id = focusId();
-
-  valuesEl.innerHTML = "";
-  statusEl.textContent = "";
-  nameEl.style.display = "";
-  descEl.style.display = "";
-  if (id === null) {
-    nameEl.textContent = "No optimizer selected";
-    nameEl.style.color = "";
-    descEl.textContent = "Check GD, Momentum, or Adam to begin.";
-    return;
-  }
-
-  // Two or three checked: one compact row per checked optimizer.
-  const ids = checkedIds();
-  if (ids.length > 1) {
-    nameEl.style.display = "none";
-    descEl.style.display = "none";
-    for (const cid of ids) {
-      const r = runs[cid];
-      const tr = document.createElement("tr");
-      const nameTd = document.createElement("td");
-      const swatch = document.createElement("span");
-      swatch.className = "swatch";
-      swatch.style.background = OPTIMIZERS[cid].color;
-      nameTd.appendChild(swatch);
-      nameTd.appendChild(document.createTextNode(OPTIMIZERS[cid].name));
-      nameTd.style.color = "#222";
-      tr.appendChild(nameTd);
-      const cells = [
-        "step " + (r.path.length - 1),
-        "loss " + fmt(loss(r.x)),
-        r.diverged ? "diverged" : r.stopped ? "stopped" : ""
-      ];
-      for (const cell of cells) {
-        const td = document.createElement("td");
-        td.textContent = cell;
-        tr.appendChild(td);
+  activate(0);
+  // A section becomes active when it crosses a line across the window:
+  // the middle on wide screens; on narrow screens (stage pinned to the
+  // top half) the middle of the text area below the stage.
+  const narrow = window.matchMedia("(max-width: 900px)");
+  let observer = null;
+  function watchSteps() {
+    if (observer) observer.disconnect();
+    const line = narrow.matches ? 77 : 50;  // % from the top of the window
+    observer = new IntersectionObserver(function (entries) {
+      for (const entry of entries) {
+        if (entry.isIntersecting) activate(steps.indexOf(entry.target));
       }
-      valuesEl.appendChild(tr);
-    }
-    return;
+    }, { rootMargin: "-" + line + "% 0px -" + (100 - line) + "% 0px" });
+    for (const step of steps) observer.observe(step);
   }
+  watchSteps();
+  narrow.addEventListener("change", watchSteps);
 
-  const opt = OPTIMIZERS[id];
-  const run = runs[id];
-  nameEl.textContent = opt.name;
-  nameEl.style.color = opt.color;
-  descEl.textContent = opt.description;
-
-  let rows = [
-    ["Step", String(run.path.length - 1)],
-    ["Position", fmtVec(run.x)]
-  ];
-  if (opt.detailLabels) {
-    // Optimizer-specific rows (Adam), each an (x1, x2) pair.
-    opt.detailLabels.forEach(function (label, i) {
-      rows.push([label, run.last ? fmtVec(run.last.details[i]) : "-"]);
-    });
-  } else {
-    rows.push(["Gradient (at the point it just left)", run.last ? fmtVec(run.last.gradient) : "-"]);
-    rows.push(["Step taken", run.last ? fmtVec(run.last.step) : "-"]);
-  }
-  rows.push(["Loss", fmt(loss(run.x))]);
-  for (const row of rows) {
-    const tr = document.createElement("tr");
-    for (const cell of row) {
-      const td = document.createElement("td");
-      td.textContent = cell;
-      tr.appendChild(td);
-    }
-    valuesEl.appendChild(tr);
-  }
-  if (run.diverged) {
-    statusEl.textContent = "Diverged: loss went above " + DIVERGE_LOSS + " or became NaN.";
-  } else if (run.stopped) {
-    statusEl.textContent = "Stopped: loss is below " + STOP_LOSS + ".";
-  }
-}
-
-function render() {
-  drawPlot();
-  renderLegend();
-  renderText();
-  document.getElementById("step-counter").textContent = "Step: " + stepCount;
-  document.getElementById("play-btn").textContent = playTimer !== null ? "Pause" : "Play";
-  updateTour();
-}
-
-function buildCheckboxes() {
-  const box = document.getElementById("optimizer-box");
-  for (const id of OPTIMIZER_IDS) {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = "checkbox";
-    input.id = "check-" + id;
-    input.checked = isChecked(id);
-    input.addEventListener("change", function () {
-      checkOrder = checkOrder.filter(function (other) { return other !== id; });
-      if (input.checked) checkOrder.push(id);
-      resetAll();  // checking or unchecking a box also resets
-    });
-    const swatch = document.createElement("span");
-    swatch.className = "swatch";
-    swatch.style.background = OPTIMIZERS[id].color;
-    label.appendChild(input);
-    label.appendChild(swatch);
-    label.appendChild(document.createTextNode(OPTIMIZERS[id].name));
-    const lrNote = document.createElement("span");
-    lrNote.className = "lr-note";
-    lrNote.id = "lr-" + id;
-    label.appendChild(lrNote);
-    box.appendChild(label);
-
-    // Learning-rate slider under the checkbox.
-    const row = makeLrSlider("lr-slider-" + id, function (lr) {
-      OPTIMIZERS[id].setLr(lr);
-      syncLrControls();
-      resetAll();  // changing a learning rate resets the optimizers
-    });
-    row.id = "lr-row-" + id;
-    box.appendChild(row);
-  }
-
-  // "Same learning rate for all": one shared slider replaces the three.
-  const sameLabel = document.createElement("label");
-  sameLabel.id = "same-lr-label";
-  const sameInput = document.createElement("input");
-  sameInput.type = "checkbox";
-  sameInput.id = "same-lr";
-  sameInput.addEventListener("change", function () {
-    if (sameInput.checked) {
-      // Start the shared value from the optimizer in focus (or GD).
-      const lr = OPTIMIZERS[focusId() || "gd"].lr();
-      for (const id of OPTIMIZER_IDS) OPTIMIZERS[id].setLr(lr);
-      syncLrControls();
-      resetAll();
-    } else {
-      syncLrControls();  // each keeps the shared value until changed
-    }
+  // Playground: one full-size widget with all controls.
+  createExplainer(document.getElementById("playground-widget"), {
+    size: "full",
+    controls: ["optimizers", "learningRates", "sameLearningRate", "play", "step", "reset",
+               "rotation", "elongation", "speed"],
+    preset: { elongation: 100, rotation: 0, optimizers: ["gd"] }
   });
-  sameLabel.appendChild(sameInput);
-  sameLabel.appendChild(document.createTextNode(" Same learning rate for all"));
-  box.appendChild(sameLabel);
 
-  const sharedRow = makeLrSlider("lr-slider-all", function (lr) {
-    for (const id of OPTIMIZER_IDS) OPTIMIZERS[id].setLr(lr);
-    syncLrControls();
-    resetAll();
-  });
-  sharedRow.id = "lr-row-all";
-  box.appendChild(sharedRow);
-}
-
-// Log-scale learning-rate slider: the slider value is log10(lr), from
-// -4 to 0 (lr 0.0001 to 1.0) in steps of 0.05.
-const LR_LOG_MIN = -4, LR_LOG_MAX = 0, LR_LOG_STEP = 0.05;
-function makeLrSlider(sliderId, onChange) {
-  const row = document.createElement("div");
-  row.className = "lr-row";
-  const slider = document.createElement("input");
-  slider.type = "range";
-  slider.id = sliderId;
-  slider.min = LR_LOG_MIN;
-  slider.max = LR_LOG_MAX;
-  slider.step = LR_LOG_STEP;
-  slider.addEventListener("input", function () {
-    onChange(Number(Math.pow(10, Number(slider.value)).toPrecision(3)));
-  });
-  row.appendChild(slider);
-  return row;
-}
-
-function formatLr(lr) {
-  return String(Number(lr.toPrecision(3)));
-}
-
-// Update the learning-rate labels and sliders to the current values, and
-// show either the three sliders or the shared one.
-function syncLrControls() {
-  const same = document.getElementById("same-lr").checked;
-  for (const id of OPTIMIZER_IDS) {
-    const lr = OPTIMIZERS[id].lr();
-    document.getElementById("lr-" + id).textContent = "lr = " + formatLr(lr);
-    document.getElementById("lr-slider-" + id).value = Math.log10(lr);
-    document.getElementById("lr-row-" + id).style.display = same ? "none" : "";
-  }
-  document.getElementById("lr-slider-all").value = Math.log10(OPTIMIZERS.gd.lr());
-  document.getElementById("lr-row-all").style.display = same ? "" : "none";
-}
-
-// Back to the default learning rates for the current elongation, each
-// optimizer with its own slider.
-function resetLearningRates() {
-  setLearningRates(LANDSCAPE.K);
-  document.getElementById("same-lr").checked = false;
-  syncLrControls();
-}
-
-// Apply the current LANDSCAPE settings: start point, contours and
-// control labels, then reset all optimizers. (Learning rates are not
-// touched here: rotating keeps them; elongation resets them separately.)
-function applyLandscape() {
-  START = startPoint();
-  redrawBackground();
-  syncLrControls();
-  document.getElementById("rotation-value").textContent = LANDSCAPE.thetaDeg + "°";
-  for (const button of document.querySelectorAll("#elongation-box button")) {
-    button.classList.toggle("selected", Number(button.dataset.k) === LANDSCAPE.K);
-  }
-  resetAll();
-}
-
-document.getElementById("rotation-slider").addEventListener("input", function (event) {
-  LANDSCAPE.thetaDeg = Number(event.target.value);
-  applyLandscape();
-});
-for (const button of document.querySelectorAll("#elongation-box button")) {
-  button.addEventListener("click", function () {
-    LANDSCAPE.K = Number(button.dataset.k);
-    resetLearningRates();  // changing the elongation sets the defaults again
-    applyLandscape();
-  });
-}
-
-for (const button of document.querySelectorAll("#speed-box button")) {
-  button.addEventListener("click", function () {
-    setSpeed(button.dataset.speed);
-  });
-}
-
-document.getElementById("play-btn").addEventListener("click", function () {
-  if (playTimer !== null) {
-    pause();
-    render();
-  } else {
-    play();
-  }
-});
-document.getElementById("step-btn").addEventListener("click", stepOnce);
-document.getElementById("reset-btn").addEventListener("click", resetAll);
-
-// =====================================================================
-// Guided tour (the text is in TOUR_STEPS at the top of the script)
-// =====================================================================
-const tour = {
-  index: 0,
-  stepPressed: false,  // Step (+1) pressed since entering this tour step
-  actionDone: false,   // the step's action is done: "Show explanation" is enabled
-  revealed: false,     // the explanation is showing
-  prediction: null     // index of the answer picked on the prediction step
-};
-
-// Set the controls to a tour step's preset, redraw and reset.
-function applyPreset(preset) {
-  LANDSCAPE.K = preset.elongation;
-  LANDSCAPE.thetaDeg = preset.rotation;
-  checkOrder = preset.optimizers.slice();
-  for (const id of OPTIMIZER_IDS) {
-    document.getElementById("check-" + id).checked = isChecked(id);
-  }
-  document.getElementById("rotation-slider").value = preset.rotation;
-  setSpeed(preset.speed);
-  resetLearningRates();  // tour presets use the default learning rates
-  applyLandscape();
-}
-
-// Go to a tour step: show its text, clear its progress, apply its preset.
-function enterTourStep(index) {
-  const step = TOUR_STEPS[index];
-  tour.index = index;
-  tour.stepPressed = false;
-  tour.actionDone = false;
-  tour.revealed = false;
-  tour.prediction = null;
-
-  document.getElementById("tour-progress").textContent =
-    "Step " + (index + 1) + " of " + TOUR_STEPS.length;
-  document.getElementById("tour-title").textContent = step.title;
-  document.getElementById("tour-question").textContent = step.question;
-  document.getElementById("tour-instruction").textContent = step.instruction;
-  document.getElementById("tour-reveal").innerHTML = "";
-
-  // Answer buttons (prediction step only). Built once per step, not on
-  // every redraw, so clicks are not lost while a run is playing.
-  const optionsEl = document.getElementById("tour-options");
-  optionsEl.innerHTML = "";
-  (step.options || []).forEach(function (text, i) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = text;
+  // The two buttons at the top scroll to section 1 and to the playground.
+  for (const button of document.querySelectorAll(".jump-links button")) {
     button.addEventListener("click", function () {
-      tour.prediction = i;
-      for (const other of optionsEl.querySelectorAll("button")) {
-        other.disabled = true;
-        other.classList.toggle("selected", other === button);
-      }
-      updateTour();
+      document.getElementById(button.dataset.target).scrollIntoView({ behavior: "smooth" });
     });
-    optionsEl.appendChild(button);
-  });
-
-  if (step.preset) applyPreset(step.preset); else render();
-}
-
-// Called on every redraw: check whether the step's action has been done
-// and show, hide, enable or disable the tour panel's parts to match.
-function updateTour() {
-  const step = TOUR_STEPS[tour.index];
-  if (!tour.actionDone) {
-    if (step.revealAfter === "step") {
-      tour.actionDone = tour.stepPressed;
-    } else if (step.revealAfter === "finish") {
-      tour.actionDone = runFinished();
-    } else if (step.revealAfter === "rotate-finish") {
-      tour.actionDone = tour.prediction !== null &&
-        LANDSCAPE.thetaDeg === step.targetRotation && runFinished();
-    }
   }
 
-  const revealBtn = document.getElementById("tour-reveal-btn");
-  revealBtn.style.display = step.revealAfter && !tour.revealed ? "" : "none";
-  revealBtn.disabled = !tour.actionDone;
-
-  document.getElementById("tour-question").style.display = step.question ? "" : "none";
-  document.getElementById("tour-options").style.display = step.options ? "" : "none";
-  document.getElementById("tour-reveal").style.display = tour.revealed ? "" : "none";
-  // On the prediction step the instruction appears after an answer is picked.
-  const showInstruction = !step.options || tour.prediction !== null;
-  document.getElementById("tour-instruction").style.display = showInstruction ? "" : "none";
-
-  document.getElementById("tour-back-btn").disabled = tour.index === 0;
-  document.getElementById("tour-next-btn").disabled = tour.index === TOUR_STEPS.length - 1;
-}
-
-// Table of steps-to-finish for each optimizer at 0 degrees and at the
-// step's target rotation, computed by running them in the background.
-function buildStepsTable(angles) {
-  const table = document.createElement("table");
-  const head = document.createElement("tr");
-  for (const text of [""].concat(angles.map(function (a) { return "steps at " + a + "\u00B0"; }))) {
-    const th = document.createElement("th");
-    th.textContent = text;
-    head.appendChild(th);
+  // Math: $...$ inline, $$...$$ display (KaTeX from the CDN). If the CDN
+  // can't be reached, the widgets still work and the math stays as text.
+  if (window.renderMathInElement) {
+    renderMathInElement(document.querySelector(".article"), {
+      delimiters: [
+        { left: "$$", right: "$$", display: true },
+        { left: "$", right: "$", display: false }
+      ],
+      ignoredClasses: ["explainer"],
+      throwOnError: false
+    });
   }
-  table.appendChild(head);
-  for (const id of OPTIMIZER_IDS) {
-    const tr = document.createElement("tr");
-    const nameTd = document.createElement("td");
-    const swatch = document.createElement("span");
-    swatch.className = "swatch";
-    swatch.style.background = OPTIMIZERS[id].color;
-    nameTd.appendChild(swatch);
-    nameTd.appendChild(document.createTextNode(OPTIMIZERS[id].name));
-    tr.appendChild(nameTd);
-    for (const angle of angles) {
-      const n = stepsToFinish(id, angle);
-      const td = document.createElement("td");
-      td.textContent = n === null ? "more than " + MAX_PLAY_STEPS : String(n);
-      tr.appendChild(td);
-    }
-    table.appendChild(tr);
-  }
-  return table;
-}
-
-function showReveal() {
-  const step = TOUR_STEPS[tour.index];
-  const revealEl = document.getElementById("tour-reveal");
-  revealEl.innerHTML = "";
-  if (step.options) {
-    const verdict = document.createElement("p");
-    verdict.textContent = tour.prediction === step.correctOption ? step.matchText : step.mismatchText;
-    revealEl.appendChild(verdict);
-    revealEl.appendChild(buildStepsTable([0, step.targetRotation]));
-  }
-  const text = document.createElement("p");
-  text.textContent = step.reveal;
-  revealEl.appendChild(text);
-  tour.revealed = true;
-  updateTour();
-}
-
-document.getElementById("tour-reveal-btn").addEventListener("click", showReveal);
-document.getElementById("tour-back-btn").addEventListener("click", function () {
-  if (tour.index > 0) enterTourStep(tour.index - 1);
-});
-document.getElementById("tour-next-btn").addEventListener("click", function () {
-  if (tour.index < TOUR_STEPS.length - 1) enterTourStep(tour.index + 1);
-});
-
-buildCheckboxes();
-sizePlot();
-enterTourStep(0);  // applies the first step's preset, which also draws everything
 </script>
 </body>
 </html>
